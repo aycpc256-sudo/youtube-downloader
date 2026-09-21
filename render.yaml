@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: personal-youtube-downloader
-    runtime: docker
-    plan: free
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    healthCheckPath: /api/health
