@@ -7,7 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 app=FastAPI(title="Personal YouTube Downloader API")
-ALLOWED_ORIGINS=["https://YOUR-GITHUB-ID.github.io","http://localhost:8000","http://127.0.0.1:8000"]
+ALLOWED_ORIGINS = [
+    "https://aycpc256-sudo.github.io",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
 app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_methods=["GET","OPTIONS"],allow_headers=["*"])
 HOSTS={"youtube.com","www.youtube.com","m.youtube.com","youtu.be"}
 def validate(u):
