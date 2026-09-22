@@ -12,7 +12,13 @@ ALLOWED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ]
-app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_methods=["GET","OPTIONS"],allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["Content-Disposition", "Content-Length"],
+)
 HOSTS={"youtube.com","www.youtube.com","m.youtube.com","youtu.be"}
 def validate(u):
  p=urlparse(u)
