@@ -11,10 +11,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const POLL_INTERVAL_MS = 2000;
 
-    // 영상이 이 시간(초)보다 길면 처리 시간이 오래 걸릴 수 있다고
-    // 미리 경고한다 (30분).
-    const LONG_VIDEO_WARN_SECONDS = 30 * 60;
-
     let currentJobId = null;
     let pollTimer = null;
     let cancelled = false;
@@ -86,12 +82,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function formatDuration(seconds) {
-        const m = Math.floor(seconds / 60);
-        const s = Math.floor(seconds % 60);
-        return `${m}분 ${s}초`;
-    }
-
     formatInputs.forEach(input => {
         input.addEventListener("change", refreshQuality);
     });
@@ -115,39 +105,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
         cancelled = false;
         setBusy(true);
-        setStatus("영상 정보를 확인하는 중...", 2);
-
-        // --------------------------------------------------------
-        // 1) 길이가 아주 긴 영상이면 미리 경고 (처리 시간 예측 목적)
-        //    이 요청이 실패해도 다운로드 자체는 계속 진행한다.
-        // --------------------------------------------------------
-        try {
-            const infoRes = await fetch(
-                `${API_BASE}/api/info?${new URLSearchParams({ url: u })}`
-            );
-
-            if (infoRes.ok) {
-                const infoData = await infoRes.json();
-                const duration = infoData.duration;
-
-                if (duration && duration > LONG_VIDEO_WARN_SECONDS) {
-                    const proceed = confirm(
-                        `영상 길이가 ${formatDuration(duration)}입니다.\n` +
-                        `길이가 길수록 서버 처리 시간이 오래 걸리며 실패 확률도 ` +
-                        `높아집니다. 계속하시겠습니까?`
-                    );
-
-                    if (!proceed) {
-                        setStatus("취소되었습니다.", 0);
-                        setBusy(false);
-                        return;
-                    }
-                }
-            }
-        } catch (_) {
-            // info 조회 실패는 무시하고 계속 진행
-        }
-
         setStatus("서버에 작업을 등록하는 중...", 5);
 
         try {
