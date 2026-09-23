@@ -1,13 +1,9 @@
 FROM python:3.12-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PORT=10000
-ENV BGUTIL_PORT=4416
-ENV DENO_NO_UPDATE_CHECK=1
+# ------------------------------------------------------------
+# System packages
+# ------------------------------------------------------------
 
-# ---------------------------------------------------------
-# 시스템 패키지
-# ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
@@ -16,39 +12,90 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# ---------------------------------------------------------
-# Deno 설치 (PO Token 생성용 JavaScript 런타임)
-# ---------------------------------------------------------
+
+# ------------------------------------------------------------
+# Install Deno
+# ------------------------------------------------------------
+
 RUN curl -fsSL -o /tmp/deno.zip \
     https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
     && unzip -q /tmp/deno.zip -d /usr/local/bin \
     && chmod +x /usr/local/bin/deno \
     && rm /tmp/deno.zip
 
-# ---------------------------------------------------------
-# BgUtils POT Provider 서버 설치 (플러그인과 동일한 2.0.0)
-# ---------------------------------------------------------
-WORKDIR /opt
-RUN git clone --single-branch --branch 2.0.0 --depth 1 \
-    https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git bgutil
 
-WORKDIR /opt/bgutil/server
-RUN deno install --allow-scripts=npm:canvas --frozen
+# ------------------------------------------------------------
+# App
+# ------------------------------------------------------------
 
-# ---------------------------------------------------------
-# FastAPI 애플리케이션
-# ---------------------------------------------------------
 WORKDIR /app
+
+
+# ------------------------------------------------------------
+# Python dependencies
+# ------------------------------------------------------------
+
 COPY requirements.txt .
+
 RUN pip install --no-cache-dir -r requirements.txt
+
+
+# ------------------------------------------------------------
+# BgUtils 2.0.0
+# ------------------------------------------------------------
+
+RUN git clone \
+    --depth 1 \
+    --branch 2.0.0 \
+    https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
+    /opt/bgutil-ytdlp-pot-provider
+
+
+# ------------------------------------------------------------
+# Install BgUtils server dependencies
+# ------------------------------------------------------------
+
+WORKDIR /opt/bgutil-ytdlp-pot-provider/server
+
+RUN deno install \
+    --allow-scripts=npm:canvas \
+    --frozen
+
+
+# ------------------------------------------------------------
+# Return to application
+# ------------------------------------------------------------
+
+WORKDIR /app
 
 COPY server.py .
 
+
+# ------------------------------------------------------------
+# Environment
+# ------------------------------------------------------------
+
+ENV PORT=10000
+ENV BGUTIL_PORT=4416
+
 EXPOSE 10000
 
-# ---------------------------------------------------------
-# ★ 수정된 CMD
-# - node_modules 디렉터리에서 실행
-# - ../src/main.ts → /opt/bgutil/server/src/main.ts (올바른 경로)
-# ---------------------------------------------------------
-CMD ["sh", "-c", "cd /opt/bgutil/server/node_modules && deno run --allow-env --allow-net --allow-ffi=. --allow-read=. ../src/main.ts --host 127.0.0.1 --port ${BGUTIL_PORT} & uvicorn server:app --host 0.0.0.0 --port ${PORT}"]
+
+# ------------------------------------------------------------
+# Start BgUtils + FastAPI
+# ------------------------------------------------------------
+
+CMD ["sh", "-c", "\
+cd /opt/bgutil-ytdlp-pot-provider/server/node_modules && \
+deno run \
+--allow-env \
+--allow-net \
+--allow-ffi=. \
+--allow-read=. \
+../src/main.ts \
+--host 127.0.0.1 \
+--port ${BGUTIL_PORT} & \
+uvicorn server:app \
+--host 0.0.0.0 \
+--port ${PORT} \
+"]
