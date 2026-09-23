@@ -467,6 +467,24 @@ def run_download_job(job_id: str, url: str, fmt: str, quality: str):
             }
             media_type = "audio/mpeg"
 
+        elif fmt == "m4a":
+            # 유튜브 오디오는 대부분 원래 m4a(AAC) 컨테이너이므로,
+            # mp3처럼 강제 재인코딩하지 않고 원본 코덱을 그대로
+            # remux만 해서 훨씬 빠르고 화질 손실도 없다.
+            # (원본이 m4a가 아닌 경우에만 FFmpegExtractAudio가
+            #  최소한의 변환을 수행한다)
+            ydl_opts = {
+                **base,
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "m4a",
+                    }
+                ],
+            }
+            media_type = "audio/mp4"
+
         else:
             height_match = re.search(r"(\d+)", quality)
             height = height_match.group(1) if height_match else "1080"
@@ -632,7 +650,7 @@ def info(
 @app.post("/api/jobs")
 def create_job(
     url: str = Query(..., min_length=10),
-    format: str = Query("mp3", pattern="^(mp3|mp4)$"),
+    format: str = Query("mp3", pattern="^(mp3|m4a|mp4)$"),
     quality: str = Query("192 kbps"),
 ):
 
