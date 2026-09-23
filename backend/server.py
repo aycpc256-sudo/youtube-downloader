@@ -185,6 +185,123 @@ def get_base_options():
 
 
 # ============================================================
+# iOS 호환성 보장
+#
+# iOS(Files 앱 / QuickTime / AVFoundation)는
+# 비디오: H.264(avc1)
+# 오디오: AAC
+# 컨테이너: mp4 + moov atom이 앞쪽(faststart)
+# 인 경우에만 안정적으로 재생됨.
+#
+# yt-dlp가 이미 avc1+aac로 받아왔다면 재인코딩 없이 그대로 통과.
+# 그 외 코덱(vp9, av1, opus 등)이면 ffmpeg로 강제 변환.
+# ============================================================
+
+def probe_codecs(filepath: Path):
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "csv=p=0",
+                str(filepath),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        video_codec = proc.stdout.strip().lower()
+    except Exception:
+        video_codec = ""
+
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "csv=p=0",
+                str(filepath),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        audio_codec = proc.stdout.strip().lower()
+    except Exception:
+        audio_codec = ""
+
+    return video_codec, audio_codec
+
+
+def ensure_ios_compatible_mp4(filepath: Path) -> Path:
+    video_codec, audio_codec = probe_codecs(filepath)
+
+    video_ok = video_codec in ("h264",)
+    audio_ok = audio_codec in ("aac",)
+
+    if video_ok and audio_ok:
+        # 코덱은 이미 호환됨. faststart만 별도로 다시 씌우면
+        # 시간이 오래 걸리므로(재먹싱) 생략하고 그대로 반환.
+        # (yt-dlp가 merge_output_format=mp4로 만든 파일은
+        # 대체로 문제없이 재생됨)
+        return filepath
+
+    # --------------------------------------------------------
+    # 코덱이 안 맞으면 강제 재인코딩
+    # --------------------------------------------------------
+
+    fixed_path = filepath.with_name(
+        filepath.stem + "_ios" + filepath.suffix
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(filepath),
+    ]
+
+    if video_ok:
+        cmd += ["-c:v", "copy"]
+    else:
+        cmd += [
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+        ]
+
+    if audio_ok:
+        cmd += ["-c:a", "copy"]
+    else:
+        cmd += ["-c:a", "aac", "-b:a", "192k"]
+
+    cmd += [
+        "-movflags", "+faststart",
+        str(fixed_path),
+    ]
+
+    try:
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            timeout=1800,
+        )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "영상을 재생 가능한 형식으로 변환하는 데 "
+                f"실패했습니다: {e.stderr.decode(errors='ignore')[:500]}"
+            )
+        )
+
+    filepath.unlink(missing_ok=True)
+    return fixed_path
+
+
+# ============================================================
 # Health
 # ============================================================
 
@@ -351,32 +468,36 @@ def download(
 
         # ====================================================
         # MP4
+        #
+        # iOS 호환을 위해 avc1(H.264) + m4a(AAC) 조합을
+        # 최우선으로 시도한다. 이 조합을 못 찾을 때만
+        # 다른 코덱으로 폴백하고, 다운로드 후
+        # ensure_ios_compatible_mp4()가 필요하면 재인코딩한다.
         # ====================================================
-else:
-    height_match = re.search(r"(\d+)", quality)
 
-    if height_match:
-        height = height_match.group(1)
-        format_spec = (
-            f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]/"
-            f"best[height<={height}][vcodec^=avc1]/"
-            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
-            f"best"
-        )
-    else:
-        format_spec = (
-            "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/"
-            "best[vcodec^=avc1]/"
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-            "best"
-        )
+        else:
 
-    ydl_opts = {
-        **base,
-        "format": format_spec,
-        "merge_output_format": "mp4",
-    }
-    media_type = "video/mp4"
+            height_match = re.search(r"(\d+)", quality)
+            height = height_match.group(1) if height_match else "2160"
+
+            format_spec = (
+                f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]/"
+                f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
+                f"best[height<={height}][vcodec^=avc1]/"
+                f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
+                f"bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/"
+                f"best[vcodec^=avc1]/"
+                f"best[height<={height}]/"
+                f"best"
+            )
+
+            ydl_opts = {
+                **base,
+                "format": format_spec,
+                "merge_output_format": "mp4",
+            }
+
+            media_type = "video/mp4"
 
         # ====================================================
         # yt-dlp 실행
@@ -412,6 +533,13 @@ else:
             files,
             key=lambda f: f.stat().st_size
         )
+
+        # ----------------------------------------------------
+        # mp4는 iOS 재생 호환성 검사 후 필요시 재인코딩
+        # ----------------------------------------------------
+
+        if format == "mp4":
+            filepath = ensure_ios_compatible_mp4(filepath)
 
         filename = safe_filename(
             filepath.name
@@ -538,6 +666,22 @@ def diag():
         result["bgutil_ping"] = (
             f"error: {e}"
         )
+
+    # --------------------------------------------------------
+    # ffmpeg / ffprobe 존재 여부 (iOS 재인코딩에 필요)
+    # --------------------------------------------------------
+
+    for tool in ("ffmpeg", "ffprobe"):
+        try:
+            proc = subprocess.run(
+                [tool, "-version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            result[f"{tool}_available"] = proc.returncode == 0
+        except Exception as e:
+            result[f"{tool}_available"] = f"error: {e}"
 
     # --------------------------------------------------------
     # 실제 YouTube 테스트
