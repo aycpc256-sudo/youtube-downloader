@@ -596,3 +596,9 @@ def download(
                 f"{e}"
             ),
         )
+@app.get("/api/test123")
+def test123():
+    return {
+        "ok": True,
+        "message": "NEW_SERVER_PY_IS_RUNNING"
+    }
