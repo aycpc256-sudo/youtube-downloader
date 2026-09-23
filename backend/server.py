@@ -400,12 +400,26 @@ def make_progress_hook(job_id: str):
                 f" ({speed / 1048576:.1f} MB/s)" if speed else ""
             )
 
+            eta_seconds = d.get("eta")
+
+            eta_text = ""
+            if eta_seconds is not None and eta_seconds >= 0:
+                m, s = divmod(int(eta_seconds), 60)
+                h, m = divmod(m, 60)
+                if h:
+                    eta_text = f" · 남은 시간 약 {h}시간 {m}분"
+                elif m:
+                    eta_text = f" · 남은 시간 약 {m}분 {s}초"
+                else:
+                    eta_text = f" · 남은 시간 약 {s}초"
+
             with JOBS_LOCK:
                 if job_id in JOBS:
                     JOBS[job_id]["status"] = "downloading"
                     JOBS[job_id]["progress"] = round(percent, 1)
+                    JOBS[job_id]["eta_seconds"] = eta_seconds
                     JOBS[job_id]["message"] = (
-                        f"다운로드 중... {round(percent)}%{speed_text}"
+                        f"다운로드 중... {round(percent)}%{speed_text}{eta_text}"
                     )
 
         elif d.get("status") == "finished":
@@ -682,6 +696,7 @@ def job_status(job_id: str):
             "message": job.get("message", ""),
             "filename": job.get("filename", ""),
             "compat_warning": job.get("compat_warning", ""),
+            "eta_seconds": job.get("eta_seconds"),
         }
 
 
