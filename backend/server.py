@@ -38,8 +38,12 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=[
+        "Content-Disposition",
+        "Content-Length",
+        "Content-Type",
+    ],
 )
-
 
 # ============================================================
 # 기본 설정
