@@ -489,13 +489,15 @@ def run_download_job(job_id: str, url: str, fmt: str, quality: str):
             height_match = re.search(r"(\d+)", quality)
             height = height_match.group(1) if height_match else "1080"
 
+            # 코덱을 미리 avc1로 강제하지 않는다. 1080p 이상은 h264
+            # 단일/분리 스트림이 아예 없는 영상이 많아, 강제하면 오히려
+            # 원치 않는 코덱(av1 등)으로 떨어져 다운로드 후 강제 재인코딩
+            # (가장 느린 단계)을 유발하는 경우가 많았다.
+            # 대신 yt-dlp가 고르는 진짜 "최선"을 그대로 받고, 다운로드 후
+            # ensure_ios_compatible_mp4()가 실제로 필요한 경우에만 변환한다.
             format_spec = (
-                f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]/"
-                f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
-                f"best[height<={height}][vcodec^=avc1]/"
-                f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
-                f"bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/"
-                f"best[vcodec^=avc1]/"
+                f"best[height<={height}][ext=mp4]/"
+                f"bestvideo[height<={height}]+bestaudio/"
                 f"best[height<={height}]/"
                 f"best"
             )
