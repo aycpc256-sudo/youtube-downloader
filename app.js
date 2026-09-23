@@ -9,8 +9,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const bar = document.getElementById("bar");
     const formatInputs = document.querySelectorAll('input[name="format"]');
 
-    let controller = null;
-    let activeObjectUrl = null;
+    const POLL_INTERVAL_MS = 2000;
+
+    // 영상이 이 시간(초)보다 길면 처리 시간이 오래 걸릴 수 있다고
+    // 미리 경고한다 (30분).
+    const LONG_VIDEO_WARN_SECONDS = 30 * 60;
+
+    let currentJobId = null;
+    let pollTimer = null;
+    let cancelled = false;
 
     const qualities = {
         mp3: [
@@ -20,9 +27,9 @@ document.addEventListener("DOMContentLoaded", () => {
             ["128", "128 kbps"],
             ["96", "96 kbps"]
         ],
+        // 4K(2160p)는 서버 처리 시간이 급격히 늘어나 타임아웃 위험이
+        // 커서 제거했습니다. 필요하시면 1440p까지 사용하세요.
         mp4: [
-            ["best", "최고 화질"],
-            ["2160", "2160p (4K)"],
             ["1440", "1440p"],
             ["1080", "1080p"],
             ["720", "720p"],
@@ -32,15 +39,12 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const getFormat = () => {
-        const checked = document.querySelector(
-            'input[name="format"]:checked'
-        );
+        const checked = document.querySelector('input[name="format"]:checked');
         return checked ? checked.value : "mp3";
     };
 
     function refreshQuality() {
         const f = getFormat();
-
         quality.innerHTML = "";
 
         for (const [value, text] of qualities[f]) {
@@ -55,8 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
         status.textContent = text;
 
         if (progress !== null) {
-            bar.style.width =
-                Math.max(0, Math.min(100, progress)) + "%";
+            bar.style.width = Math.max(0, Math.min(100, progress)) + "%";
         }
     }
 
@@ -71,18 +74,17 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    function extractFilename(disposition, fallback) {
-        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-        if (utf8Match) {
-            return decodeURIComponent(utf8Match[1]);
+    function stopPolling() {
+        if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
         }
+    }
 
-        const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
-        if (plainMatch) {
-            return plainMatch[1];
-        }
-
-        return fallback;
+    function formatDuration(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}분 ${s}초`;
     }
 
     formatInputs.forEach(input => {
@@ -106,157 +108,187 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        controller = new AbortController();
-
+        cancelled = false;
         setBusy(true);
+        setStatus("영상 정보를 확인하는 중...", 2);
 
-        const params = new URLSearchParams({
-            url: u,
-            format: f,
-            quality: q
-        });
-
-        const downloadUrl = `${API_BASE}/api/download?${params.toString()}`;
-
-        // ----------------------------------------------------
-        // mp4는 파일이 커질 수 있어(수백MB~수GB) fetch로 받아
-        // 메모리(Blob)에 조립하지 않는다. 대용량 Blob 조립은
-        // 특히 iOS Safari에서 메모리 부족으로 파일이 잘리거나
-        // 손상되는 원인이 된다. 대신 브라우저/OS의 네이티브
-        // 스트리밍 다운로드(링크 직접 열기)를 한 번만 요청한다.
-        // 진행률 표시는 못 하지만 훨씬 안전하다.
-        //
-        // mp3는 항상 충분히 작으므로 기존처럼 fetch+Blob로
-        // 받아 진행률을 보여준다.
-        // ----------------------------------------------------
-
-        if (f === "mp4") {
-            setStatus(
-                "서버에서 변환 중입니다. 화질에 따라 시간이 걸릴 수 있으며, " +
-                "완료되면 브라우저 다운로드가 자동으로 시작됩니다.",
-                10
+        // --------------------------------------------------------
+        // 1) 길이가 아주 긴 영상이면 미리 경고 (처리 시간 예측 목적)
+        //    이 요청이 실패해도 다운로드 자체는 계속 진행한다.
+        // --------------------------------------------------------
+        try {
+            const infoRes = await fetch(
+                `${API_BASE}/api/info?${new URLSearchParams({ url: u })}`
             );
 
-            const link = document.createElement("a");
-            link.href = downloadUrl;
-            // 크로스 오리진이라 link.download는 브라우저가 무시할 수 있으며,
-            // 실제 파일명은 서버의 Content-Disposition 헤더로 결정된다.
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
+            if (infoRes.ok) {
+                const infoData = await infoRes.json();
+                const duration = infoData.duration;
 
-            // 이 방식은 fetch가 아니라 네비게이션이므로 완료 시점을
-            // JS에서 알 수 없다. 사용자에게 안내만 하고 종료한다.
-            setStatus(
-                "다운로드가 시작되었습니다. iOS는 공유 시트 또는 " +
-                "다운로드 목록에서, PC/안드로이드는 다운로드 폴더에서 확인하세요.",
-                100
-            );
+                if (duration && duration > LONG_VIDEO_WARN_SECONDS) {
+                    const proceed = confirm(
+                        `영상 길이가 ${formatDuration(duration)}입니다.\n` +
+                        `길이가 길수록 서버 처리 시간이 오래 걸리며 실패 확률도 ` +
+                        `높아집니다. 계속하시겠습니까?`
+                    );
 
-            controller = null;
-            setBusy(false);
-            return;
+                    if (!proceed) {
+                        setStatus("취소되었습니다.", 0);
+                        setBusy(false);
+                        return;
+                    }
+                }
+            }
+        } catch (_) {
+            // info 조회 실패는 무시하고 계속 진행
         }
 
-        setStatus("서버에서 다운로드 준비 중...", 5);
+        setStatus("서버에 작업을 등록하는 중...", 5);
 
         try {
-            const response = await fetch(downloadUrl, {
-                signal: controller.signal
-            });
+            // ----------------------------------------------------
+            // 2) 작업 생성 (이 요청은 즉시 반환되고, 실제 다운로드는
+            //    서버 백그라운드에서 진행된다)
+            // ----------------------------------------------------
 
-            if (!response.ok) {
-                let message = `서버 오류 (${response.status})`;
+            const createRes = await fetch(
+                `${API_BASE}/api/jobs?${new URLSearchParams({
+                    url: u,
+                    format: f,
+                    quality: q
+                })}`,
+                { method: "POST" }
+            );
 
+            if (!createRes.ok) {
+                let message = `작업 등록 실패 (${createRes.status})`;
                 try {
-                    const data = await response.json();
-                    if (data.detail) {
-                        message = data.detail;
-                    }
+                    const data = await createRes.json();
+                    if (data.detail) message = data.detail;
                 } catch (_) {}
-
                 throw new Error(message);
             }
 
-            const total = Number(
-                response.headers.get("Content-Length") || 0
-            );
+            const { job_id } = await createRes.json();
+            currentJobId = job_id;
 
-            const disposition =
-                response.headers.get("Content-Disposition") || "";
+            // ----------------------------------------------------
+            // 3) 짧은 주기로 상태만 확인 (긴 연결을 유지하지 않으므로
+            //    iOS Safari / Render 프록시의 idle 타임아웃에 걸리지 않음)
+            // ----------------------------------------------------
 
-            const filename = extractFilename(
-                disposition,
-                "youtube-audio.mp3"
-            );
-
-            if (!response.body) {
-                throw new Error("다운로드 데이터를 받을 수 없습니다.");
-            }
-
-            const reader = response.body.getReader();
-            const chunks = [];
-            let received = 0;
-
-            while (true) {
-                const result = await reader.read();
-
-                if (result.done) {
-                    break;
-                }
-
-                chunks.push(result.value);
-                received += result.value.byteLength;
-
-                if (total > 0) {
-                    const percent = received / total * 100;
-                    setStatus(
-                        `다운로드 중... ${Math.round(percent)}%`,
-                        percent
-                    );
-                } else {
-                    const mb = received / 1048576;
-                    setStatus(`다운로드 중... ${mb.toFixed(1)} MB`, 70);
-                }
-            }
-
-            const blob = new Blob(chunks, { type: "audio/mpeg" });
-            const objectUrl = URL.createObjectURL(blob);
-            activeObjectUrl = objectUrl;
-
-            const link = document.createElement("a");
-            link.href = objectUrl;
-            link.download = filename;
-
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-
-            setTimeout(() => {
-                if (activeObjectUrl === objectUrl) {
-                    URL.revokeObjectURL(objectUrl);
-                    activeObjectUrl = null;
-                }
-            }, 1500);
-
-            setStatus("저장 완료", 100);
+            await pollJob(job_id, f);
 
         } catch (error) {
-            if (error.name === "AbortError") {
-                setStatus("취소되었습니다.", 0);
-            } else {
-                setStatus(`실패: ${error.message}`, 0);
-            }
-
-        } finally {
-            controller = null;
+            setStatus(`실패: ${error.message}`, 0);
             setBusy(false);
+            currentJobId = null;
         }
     });
 
-    cancelBtn.addEventListener("click", () => {
-        if (controller) {
-            controller.abort();
+    function pollJob(jobId, format) {
+        return new Promise((resolve, reject) => {
+
+            const tick = async () => {
+                if (cancelled) {
+                    resolve();
+                    return;
+                }
+
+                try {
+                    const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+
+                    if (res.status === 404) {
+                        throw new Error("작업을 찾을 수 없습니다. 다시 시도해주세요.");
+                    }
+
+                    if (!res.ok) {
+                        throw new Error(`상태 확인 실패 (${res.status})`);
+                    }
+
+                    const data = await res.json();
+
+                    if (data.status === "error") {
+                        throw new Error(data.message || "다운로드 중 오류가 발생했습니다.");
+                    }
+
+                    if (data.status === "cancelled") {
+                        setStatus("취소되었습니다.", 0);
+                        setBusy(false);
+                        resolve();
+                        return;
+                    }
+
+                    if (data.status === "done") {
+                        setStatus("완료! 다운로드를 시작합니다...", 100);
+                        triggerFileDownload(jobId, data.filename);
+                        setBusy(false);
+
+                        // 상태 텍스트만으로는 놓치기 쉬우므로 명확히 alert로 알림
+                        if (data.compat_warning) {
+                            alert(`⚠️ ${data.compat_warning}`);
+                        }
+
+                        resolve();
+                        return;
+                    }
+
+                    // queued / downloading / processing
+                    setStatus(
+                        data.message || "처리 중...",
+                        data.progress ?? null
+                    );
+
+                    pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+
+                } catch (error) {
+                    setStatus(`실패: ${error.message}`, 0);
+                    setBusy(false);
+                    reject(error);
+                }
+            };
+
+            tick();
+        });
+    }
+
+    function triggerFileDownload(jobId, filename) {
+        // 브라우저가 직접 GET으로 스트리밍 다운로드하도록 링크를 연다.
+        // JS에서 Blob으로 조립하지 않으므로 iOS Safari의 메모리 문제로
+        // 대용량 mp4가 손상되는 일이 없다.
+        //
+        // 참고: link.download는 크로스 오리진 링크에서는 브라우저가
+        // 무시할 수 있고, 특히 iOS Safari는 미디어 파일을 다운로드하지
+        // 않고 새 탭에서 재생만 하는 경우가 많다. 이 경우 사용자가
+        // 공유 버튼 → "파일에 저장"을 눌러야 하며, 이는 iOS 자체 정책이라
+        // 코드로 우회할 수 없다. 그래도 PC/Android에서는 파일명이
+        // 정확히 지정되도록 download 속성은 남겨둔다.
+        const fileUrl = `${API_BASE}/api/jobs/${jobId}/file`;
+
+        const link = document.createElement("a");
+        link.href = fileUrl;
+        if (filename) {
+            link.download = filename;
         }
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    }
+
+    cancelBtn.addEventListener("click", async () => {
+        cancelled = true;
+        stopPolling();
+
+        if (currentJobId) {
+            try {
+                await fetch(`${API_BASE}/api/jobs/${currentJobId}/cancel`, {
+                    method: "POST"
+                });
+            } catch (_) {}
+        }
+
+        setStatus("취소되었습니다.", 0);
+        setBusy(false);
+        currentJobId = null;
     });
 });
