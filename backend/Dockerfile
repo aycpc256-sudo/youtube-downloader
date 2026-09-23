@@ -27,7 +27,6 @@ RUN curl -fsSL -o /tmp/deno.zip \
 
 # ---------------------------------------------------------
 # BgUtils POT Provider 서버 설치 (플러그인과 동일한 2.0.0)
-# - --single-branch --branch 2.0.0 --depth 1 로 정확히 지정
 # ---------------------------------------------------------
 WORKDIR /opt
 RUN git clone --single-branch --branch 2.0.0 --depth 1 \
@@ -48,7 +47,8 @@ COPY server.py .
 EXPOSE 10000
 
 # ---------------------------------------------------------
-# bgutil POT 서버 :4416 + FastAPI :$PORT 동시 실행
-# - deno run ... ../src/main.ts --host 127.0.0.1 --port 4416
+# ★ 수정된 CMD
+# - node_modules 디렉터리에서 실행
+# - ../src/main.ts → /opt/bgutil/server/src/main.ts (올바른 경로)
 # ---------------------------------------------------------
-CMD ["sh", "-c", "cd /opt/bgutil/server && deno run --allow-env --allow-net --allow-ffi=. --allow-read=. ../src/main.ts --host 127.0.0.1 --port ${BGUTIL_PORT} & uvicorn server:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "cd /opt/bgutil/server/node_modules && deno run --allow-env --allow-net --allow-ffi=. --allow-read=. ../src/main.ts --host 127.0.0.1 --port ${BGUTIL_PORT} & uvicorn server:app --host 0.0.0.0 --port ${PORT}"]
