@@ -352,45 +352,31 @@ def download(
         # ====================================================
         # MP4
         # ====================================================
+else:
+    height_match = re.search(r"(\d+)", quality)
 
-        else:
+    if height_match:
+        height = height_match.group(1)
+        format_spec = (
+            f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]/"
+            f"best[height<={height}][vcodec^=avc1]/"
+            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"best"
+        )
+    else:
+        format_spec = (
+            "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/"
+            "best[vcodec^=avc1]/"
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+            "best"
+        )
 
-            height_match = re.search(
-                r"(\d+)",
-                quality
-            )
-
-            if height_match:
-
-                height = height_match.group(1)
-
-                format_spec = (
-                    f"bestvideo[height<={height}]"
-                    f"[ext=mp4]+"
-                    f"bestaudio[ext=m4a]/"
-                    f"best[height<={height}]"
-                    f"[ext=mp4]/"
-                    f"best"
-                )
-
-            else:
-
-                format_spec = (
-                    "bestvideo[ext=mp4]+"
-                    "bestaudio[ext=m4a]/"
-                    "best[ext=mp4]/"
-                    "best"
-                )
-
-            ydl_opts = {
-                **base,
-
-                "format": format_spec,
-
-                "merge_output_format": "mp4",
-            }
-
-            media_type = "video/mp4"
+    ydl_opts = {
+        **base,
+        "format": format_spec,
+        "merge_output_format": "mp4",
+    }
+    media_type = "video/mp4"
 
         # ====================================================
         # yt-dlp 실행
