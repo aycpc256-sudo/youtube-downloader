@@ -179,7 +179,115 @@ def get_base_options():
 
 
 # ============================================================
-# iOS 호환성 보장 (mp4)
+# 작업(Job) 관리 - 전방 선언
+#
+# run_ffmpeg_with_progress()가 JOBS/JOBS_LOCK/JobCancelled를
+# 참조하므로, 아래 코덱/변환 함수들보다 먼저 정의한다.
+# ============================================================
+
+JOBS: dict = {}
+JOBS_LOCK = threading.Lock()
+
+
+class JobCancelled(Exception):
+    pass
+
+
+# ============================================================
+# ffmpeg 진행률 추적 실행기
+#
+# ffmpeg의 '-progress pipe:1' 옵션으로 out_time_ms(진행 시간),
+# speed(배속) 등을 실시간으로 읽어와 job 상태(progress/message)에
+# 반영한다. 후처리(오디오 인코딩, iOS 호환 변환 등) 단계에서도
+# 다운로드 단계처럼 실시간 진행률/속도를 보여주기 위함이며,
+# 루프 안에서 cancel_requested를 체크해 취소도 즉시 반영한다.
+# ============================================================
+
+def run_ffmpeg_with_progress(
+    cmd: list,
+    duration: float,
+    job_id: str,
+    message_prefix: str = "변환 중",
+    timeout_seconds: float = None,
+):
+    tracked_cmd = [cmd[0], "-progress", "pipe:1", "-nostats"] + cmd[1:]
+
+    proc = subprocess.Popen(
+        tracked_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+
+    start_time = time.time()
+    last_percent = 0.0
+
+    def _job_cancelled():
+        with JOBS_LOCK:
+            job = JOBS.get(job_id)
+            return bool(job and job.get("cancel_requested"))
+
+    try:
+        for line in proc.stdout:
+            if timeout_seconds and (time.time() - start_time) > timeout_seconds:
+                proc.kill()
+                raise subprocess.TimeoutExpired(tracked_cmd, timeout_seconds)
+
+            if job_id and _job_cancelled():
+                proc.kill()
+                raise JobCancelled()
+
+            line = line.strip()
+            if "=" not in line:
+                continue
+
+            key, _, value = line.partition("=")
+            value = value.strip()
+
+            if key == "out_time_ms" and duration:
+                try:
+                    seconds = int(value) / 1_000_000
+                    last_percent = min(seconds / duration * 100, 99)
+                except ValueError:
+                    pass
+
+                if job_id:
+                    with JOBS_LOCK:
+                        if job_id in JOBS:
+                            JOBS[job_id]["progress"] = round(last_percent, 1)
+                            JOBS[job_id]["message"] = (
+                                f"{message_prefix}... {round(last_percent)}%"
+                            )
+
+            elif key == "speed" and value and value != "0x":
+                if job_id:
+                    with JOBS_LOCK:
+                        if job_id in JOBS:
+                            JOBS[job_id]["message"] = (
+                                f"{message_prefix}... {round(last_percent)}% ({value})"
+                            )
+
+        proc.wait(timeout=30)
+
+    except JobCancelled:
+        if proc.poll() is None:
+            proc.kill()
+        raise
+    except subprocess.TimeoutExpired:
+        if proc.poll() is None:
+            proc.kill()
+        raise
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, tracked_cmd)
+
+
+# ============================================================
+# 코덱/길이 확인
 # ============================================================
 
 def probe_codecs(filepath: Path):
@@ -238,6 +346,75 @@ def probe_duration_seconds(filepath: Path) -> float:
         return 0.0
 
 
+# ============================================================
+# 오디오 변환 (mp3 / m4a) - 진행률 추적
+#
+# yt-dlp 내장 후처리기(FFmpegExtractAudio)는 진행률을 넘겨주지
+# 않으므로, 다운로드는 원본 그대로 받고 mp3/m4a 인코딩은 직접
+# ffmpeg를 호출해 run_ffmpeg_with_progress로 진행률을 추적한다.
+# ============================================================
+
+def encode_to_mp3(filepath: Path, bitrate: str, job_id: str) -> Path:
+    duration = probe_duration_seconds(filepath)
+    out_path = filepath.with_suffix(".mp3")
+
+    cmd = [
+        "ffmpeg", "-y", "-i", str(filepath),
+        "-vn",
+        "-c:a", "libmp3lame",
+        "-b:a", f"{bitrate}k",
+        str(out_path),
+    ]
+
+    encode_timeout = max(1800, int(duration * 3)) if duration else 1800
+
+    run_ffmpeg_with_progress(
+        cmd, duration, job_id,
+        message_prefix="오디오 변환(MP3) 중",
+        timeout_seconds=encode_timeout,
+    )
+
+    filepath.unlink(missing_ok=True)
+    return out_path
+
+
+def ensure_m4a(filepath: Path, job_id: str) -> Path:
+    _, audio_codec = probe_codecs(filepath)
+    out_path = filepath.with_suffix(".m4a")
+
+    # 이미 m4a/aac면 재인코딩 없이 이름만 맞춰 반환 (가장 빠름)
+    if filepath.suffix.lower() == ".m4a" and audio_codec == "aac":
+        if filepath != out_path:
+            filepath.rename(out_path)
+        return out_path
+
+    duration = probe_duration_seconds(filepath)
+    cmd = ["ffmpeg", "-y", "-i", str(filepath), "-vn"]
+
+    if audio_codec == "aac":
+        # 컨테이너만 다른 경우: remux만 하면 되므로 매우 빠르다.
+        cmd += ["-c:a", "copy"]
+    else:
+        cmd += ["-c:a", "aac", "-b:a", "256k"]
+
+    cmd += [str(out_path)]
+
+    encode_timeout = max(1800, int(duration * 3)) if duration else 1800
+
+    run_ffmpeg_with_progress(
+        cmd, duration, job_id,
+        message_prefix="오디오 변환(M4A) 중",
+        timeout_seconds=encode_timeout,
+    )
+
+    filepath.unlink(missing_ok=True)
+    return out_path
+
+
+# ============================================================
+# iOS 호환성 보장 (mp4) - 진행률 추적
+# ============================================================
+
 # 저사양 서버(예: Render 무료 플랜)에서 재인코딩이 현실적인 시간 안에
 # 끝나지 않을 수 있는 영상 길이. 이보다 길면 재인코딩을 시도하지 않고
 # 원본을 그대로 반환하되, 호환성 경고를 job에 남긴다.
@@ -256,13 +433,8 @@ def ensure_ios_compatible_mp4(filepath: Path, job_id: str = None) -> Path:
     duration = probe_duration_seconds(filepath)
 
     if duration and duration > REENCODE_MAX_DURATION_SECONDS:
-        if job_id:
-            with JOBS_LOCK:
-                if job_id in JOBS:
-                    JOBS[job_id]["compat_warning"] = (
-                        "영상이 너무 길어 iOS 호환 변환을 건너뛰었습니다. "
-                        "일부 기기에서 재생이 안 될 수 있습니다."
-                    )
+        # 긴 영상은 재인코딩만 건너뛰고(시간 절약), 별도 경고 메시지는
+        # 띄우지 않는다.
         return filepath
 
     fixed_path = filepath.with_name(
@@ -294,13 +466,14 @@ def ensure_ios_compatible_mp4(filepath: Path, job_id: str = None) -> Path:
     encode_timeout = max(1800, int(duration * 3)) if duration else 1800
 
     try:
-        subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            timeout=encode_timeout,
+        run_ffmpeg_with_progress(
+            cmd, duration, job_id,
+            message_prefix="iOS 호환 변환 중",
+            timeout_seconds=encode_timeout,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+    except JobCancelled:
+        raise
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         # 재인코딩이 실패/타임아웃이면 최소한 원본이라도 전달한다.
         if job_id:
             with JOBS_LOCK:
@@ -323,14 +496,6 @@ def ensure_ios_compatible_mp4(filepath: Path, job_id: str = None) -> Path:
 # 오래 "조용한" 상태로 유지되지 않아 iOS Safari나 Render 프록시가
 # 타임아웃으로 끊는 문제("Load failed")를 피할 수 있다.
 # ============================================================
-
-JOBS: dict = {}
-JOBS_LOCK = threading.Lock()
-
-
-class JobCancelled(Exception):
-    pass
-
 
 class JobLogger:
     """yt-dlp가 내는 경고/에러 중 마지막 것만 job에 기록한다.
@@ -426,8 +591,8 @@ def make_progress_hook(job_id: str):
             with JOBS_LOCK:
                 if job_id in JOBS:
                     JOBS[job_id]["status"] = "processing"
-                    JOBS[job_id]["progress"] = 99
-                    JOBS[job_id]["message"] = "후처리(변환) 중..."
+                    JOBS[job_id]["progress"] = 0
+                    JOBS[job_id]["message"] = "변환 준비 중..."
 
     return hook
 
@@ -450,38 +615,25 @@ def run_download_job(job_id: str, url: str, fmt: str, quality: str):
         base["progress_hooks"] = [make_progress_hook(job_id)]
         base["logger"] = JobLogger(job_id)
 
+        bitrate = "192"
+
         if fmt == "mp3":
             bitrate_match = re.search(r"(\d+)", quality)
             bitrate = bitrate_match.group(1) if bitrate_match else "192"
 
+            # 후처리 진행률을 직접 추적하기 위해 yt-dlp 기본 오디오
+            # 추출 후처리기는 쓰지 않고 원본 오디오만 내려받는다.
+            # 실제 mp3 인코딩은 아래에서 진행률을 추적하며 직접 실행한다.
             ydl_opts = {
                 **base,
                 "format": "bestaudio/best",
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": bitrate,
-                    }
-                ],
             }
             media_type = "audio/mpeg"
 
         elif fmt == "m4a":
-            # 유튜브 오디오는 대부분 원래 m4a(AAC) 컨테이너이므로,
-            # mp3처럼 강제 재인코딩하지 않고 원본 코덱을 그대로
-            # remux만 해서 훨씬 빠르고 화질 손실도 없다.
-            # (원본이 m4a가 아닌 경우에만 FFmpegExtractAudio가
-            #  최소한의 변환을 수행한다)
             ydl_opts = {
                 **base,
                 "format": "bestaudio[ext=m4a]/bestaudio/best",
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "m4a",
-                    }
-                ],
             }
             media_type = "audio/mp4"
 
@@ -515,8 +667,8 @@ def run_download_job(job_id: str, url: str, fmt: str, quality: str):
         with JOBS_LOCK:
             if job_id in JOBS:
                 JOBS[job_id]["status"] = "processing"
-                JOBS[job_id]["message"] = "마무리 처리 중..."
-                JOBS[job_id]["progress"] = 99
+                JOBS[job_id]["message"] = "변환 준비 중..."
+                JOBS[job_id]["progress"] = 0
 
         files = [f for f in Path(tmpdir).iterdir() if f.is_file()]
 
@@ -525,7 +677,11 @@ def run_download_job(job_id: str, url: str, fmt: str, quality: str):
 
         filepath = max(files, key=lambda f: f.stat().st_size)
 
-        if fmt == "mp4":
+        if fmt == "mp3":
+            filepath = encode_to_mp3(filepath, bitrate, job_id)
+        elif fmt == "m4a":
+            filepath = ensure_m4a(filepath, job_id)
+        else:
             filepath = ensure_ios_compatible_mp4(filepath, job_id=job_id)
 
         filename = safe_filename(filepath.name)
@@ -544,9 +700,9 @@ def run_download_job(job_id: str, url: str, fmt: str, quality: str):
     except Exception as e:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
-        # yt-dlp가 progress_hook에서 던진 JobCancelled를 자체 에러
-        # 타입(DownloadError 등)으로 감쌀 수 있으므로, 예외 타입만으로
-        # 판단하지 않고 취소 플래그를 함께 확인한다.
+        # yt-dlp/ffmpeg 실행부가 progress 루프에서 던진 JobCancelled를
+        # 자체 에러 타입으로 감쌀 수 있으므로, 예외 타입만으로 판단하지
+        # 않고 취소 플래그를 함께 확인한다.
         with JOBS_LOCK:
             job = JOBS.get(job_id)
             was_cancel_requested = bool(
@@ -674,9 +830,8 @@ def create_job(
                 )
             )
 
-    job_id = uuid.uuid4().hex
+        job_id = uuid.uuid4().hex
 
-    with JOBS_LOCK:
         JOBS[job_id] = {
             "status": "queued",
             "progress": 0,
