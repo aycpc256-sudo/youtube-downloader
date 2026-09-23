@@ -695,3 +695,96 @@ def diag():
         result["ytdlp_run_error"] = str(e)
 
     return result
+@app.get("/api/test-clients")
+def test_clients(
+    url: str = Query(..., min_length=10)
+):
+    """
+    실제 YouTube URL에 대해
+    여러 YouTube client를 다운로드 없이 테스트한다.
+
+    쿠키는 사용하지 않는다.
+    """
+
+    validate(url)
+
+    clients = [
+        "mweb",
+        "web_safari",
+        "web_embedded",
+        "android_vr",
+        "tv",
+    ]
+
+    results = []
+
+    for client in clients:
+
+        result = {
+            "client": client,
+            "success": False,
+            "title": None,
+            "error": None,
+        }
+
+        try:
+
+            options = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "socket_timeout": 30,
+
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": [client]
+                    },
+
+                    "youtubepot-bgutilhttp": {
+                        "base_url": (
+                            f"http://127.0.0.1:{BGUTIL_PORT}"
+                        )
+                    },
+                },
+            }
+
+            with yt_dlp.YoutubeDL(options) as ydl:
+
+                info = ydl.extract_info(
+                    url,
+                    download=False
+                )
+
+                result["success"] = True
+
+                result["title"] = info.get(
+                    "title"
+                )
+
+                result["video_id"] = info.get(
+                    "id"
+                )
+
+                result["duration"] = info.get(
+                    "duration"
+                )
+
+                result["format_count"] = len(
+                    info.get("formats") or []
+                )
+
+        except Exception as e:
+
+            message = str(e)
+
+            result["error"] = message[:1000]
+
+        results.append(result)
+
+    return {
+        "ok": True,
+        "url": url,
+        "video_id": "ACnbMg6o8z0",
+        "cookies": False,
+        "results": results,
+    }
