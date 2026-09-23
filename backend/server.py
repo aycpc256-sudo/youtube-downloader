@@ -71,16 +71,10 @@ def validate_url(url: str):
 # ============================================================
 
 def safe_filename(name: str) -> str:
-    name = (
-        name
-        .replace('"', "")
-        .replace("\\", "")
-        .replace("/", "_")
-        .replace("\r", "")
-        .replace("\n", "")
-    )
-
-    return name.strip() or "download"
+    # 파일시스템에서 허용되지 않는 문자만 최소한으로 대체
+    # (Windows/macOS/Linux 공통 금지 문자)
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    return name.strip(" .")[:180] or "download"
 
 
 # ============================================================
