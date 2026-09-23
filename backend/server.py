@@ -788,3 +788,62 @@ def test_clients(
         "cookies": False,
         "results": results,
     }
+
+@app.get("/api/test-youtube-debug")
+def test_youtube_debug(
+    url: str = Query(..., min_length=10)
+):
+    validate(url)
+
+    options = {
+        "quiet": False,
+        "no_warnings": False,
+        "skip_download": True,
+        "socket_timeout": 30,
+
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb"],
+                "pot_trace": ["true"],
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": f"http://127.0.0.1:{BGUTIL_PORT}"
+            },
+        },
+    }
+
+    logs = []
+
+    class Logger:
+        def debug(self, msg):
+            logs.append(f"DEBUG: {msg}")
+
+        def warning(self, msg):
+            logs.append(f"WARNING: {msg}")
+
+        def error(self, msg):
+            logs.append(f"ERROR: {msg}")
+
+    options["logger"] = Logger()
+
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(
+                url,
+                download=False
+            )
+
+        return {
+            "ok": True,
+            "title": info.get("title"),
+            "video_id": info.get("id"),
+            "format_count": len(info.get("formats") or []),
+            "logs": logs[-100:],
+        }
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e),
+            "logs": logs[-150:],
+        }
