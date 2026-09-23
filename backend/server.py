@@ -596,9 +596,102 @@ def download(
                 f"{e}"
             ),
         )
-@app.get("/api/test123")
-def test123():
-    return {
-        "ok": True,
-        "message": "NEW_SERVER_PY_IS_RUNNING"
-    }
+@app.get("/api/diag")
+def diag():
+    result = {}
+
+    # 1. 실제 yt-dlp 버전
+    try:
+        result["yt_dlp_pkg"] = pkg_version("yt-dlp")
+    except Exception as e:
+        result["yt_dlp_pkg"] = f"error: {e}"
+
+    # 2. BgUtils TCP 연결
+    try:
+        port = int(os.environ.get("BGUTIL_PORT", "4416"))
+
+        s = socket.create_connection(
+            ("127.0.0.1", port),
+            timeout=3
+        )
+
+        s.close()
+
+        result["bgutil_tcp"] = True
+
+    except Exception as e:
+        result["bgutil_tcp"] = f"error: {e}"
+
+    # 3. BgUtils HTTP 응답
+    try:
+        port = int(os.environ.get("BGUTIL_PORT", "4416"))
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/ping",
+            timeout=5
+        ) as r:
+
+            result["bgutil_ping"] = (
+                r.read()
+                .decode(errors="ignore")[:200]
+            )
+
+    except Exception as e:
+        result["bgutil_ping"] = f"error: {e}"
+
+    # 4. yt-dlp 실제 실행
+    try:
+        proc = subprocess.run(
+            [
+                "yt-dlp",
+                "-v",
+                "--skip-download",
+                "--no-warnings",
+                "--socket-timeout",
+                "20",
+                "-O",
+                "title",
+                "https://www.youtube.com/watch?v=BaW_jenozKc",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+
+        output = (
+            (proc.stderr or "")
+            + "\n"
+            + (proc.stdout or "")
+        )
+
+        lines = output.splitlines()
+
+        result["ytdlp_exit_code"] = proc.returncode
+
+        result["pot_provider_lines"] = [
+            line.strip()
+            for line in lines
+            if (
+                "bgutil" in line.lower()
+                or "[pot]" in line.lower()
+                or "po token" in line.lower()
+                or "po_token" in line.lower()
+            )
+        ][:30]
+
+        result["errors"] = [
+            line.strip()
+            for line in lines
+            if (
+                "sign in" in line.lower()
+                or "error" in line.lower()
+                or "403" in line.lower()
+                or "forbidden" in line.lower()
+                or "bot" in line.lower()
+            )
+        ][:15]
+
+    except Exception as e:
+        result["ytdlp_run_error"] = str(e)
+
+    return result
