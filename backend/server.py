@@ -71,15 +71,8 @@ def validate_url(url: str):
 # ============================================================
 
 def safe_filename(name: str) -> str:
-    name = (
-        name
-        .replace('"', "")
-        .replace("\\", "")
-        .replace("/", "_")
-        .replace("\r", "")
-        .replace("\n", "")
-    )
-
+    # HTTP 헤더를 깨뜨리는 문자만 제거 (한글/공백/쉼표 등은 유지)
+    name = re.sub(r'["\\\r\n\x00-\x1f]', "", name)
     return name.strip() or "download"
 
 
@@ -284,7 +277,7 @@ def download(
 
         outtmpl = os.path.join(
             tmpdir,
-            "%(title).150B [%(id)s].%(ext)s"
+            "%(title)s.%(ext)s"
         )
 
         base = get_base_options()
