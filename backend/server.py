@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import shutil
@@ -87,17 +88,40 @@ def safe_filename(name: str) -> str:
 #
 # /tmp/youtube-cookies.txt
 # ============================================================
-
 def prepare_youtube_cookies():
-    cookie_text = os.environ.get(
+    raw_value = os.environ.get(
         "YOUTUBE_COOKIES",
         ""
     ).strip()
 
-    if not cookie_text:
+    if not raw_value:
         return None
 
     cookie_path = "/tmp/youtube-cookies.txt"
+
+    # --------------------------------------------------------
+    # Base64 디코딩 시도
+    # - Base64 문자열이면 디코딩
+    # - 일반 텍스트(# Netscape...)면 그대로 사용
+    # --------------------------------------------------------
+    cookie_text = raw_value
+
+    if not raw_value.startswith("#"):
+        try:
+            decoded = base64.b64decode(
+                raw_value,
+                validate=True
+            ).decode("utf-8", errors="ignore")
+
+            if (
+                decoded.startswith("# Netscape HTTP Cookie File")
+                or decoded.startswith("# HTTP Cookie File")
+            ):
+                cookie_text = decoded
+
+        except Exception:
+            # Base64가 아니면 원본 그대로 사용
+            pass
 
     try:
         with open(
