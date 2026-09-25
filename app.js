@@ -1,206 +1,347 @@
-// ============================================================
-// Render Backend
-// ============================================================
+// ======================================================
+// Render 백엔드 주소
+// ======================================================
 
 const API_BASE =
   "https://youtube-downloader-onww.onrender.com";
 
 
-// ============================================================
+// ======================================================
 // DOM
-// ============================================================
+// ======================================================
 
-const $ = (selector) =>
-  document.querySelector(selector);
+const $ = (s) => document.querySelector(s);
 
+const urlInput       = $("#url");
+const qualitySel     = $("#quality");
+const qualityHint    = $("#quality-hint");
 
-const urlInput =
-  $("#url");
+const downloadBtn    = $("#download-btn");
+const cancelBtn      = $("#cancel-btn");
 
-const qualitySel =
-  $("#quality");
+const progressBar    = $("#progress-bar");
+const statusEl       = $("#status");
 
-const qualityHint =
-  $("#quality-hint");
+const deviceLabel    = $("#device-label");
 
-const downloadBtn =
-  $("#download-btn");
+const folderHint     = $("#folder-hint");
+const folderName     = $("#folder-name");
+const pickFolder     = $("#pick-folder-btn");
+const askFolder      = $("#ask-folder");
 
-const cancelBtn =
-  $("#cancel-btn");
-
-const progressBar =
-  $("#progress-bar");
-
-const statusEl =
-  $("#status");
-
-const deviceLabel =
-  $("#device-label");
-
-const folderHint =
-  $("#folder-hint");
-
-const folderName =
-  $("#folder-name");
-
-const pickFolder =
-  $("#pick-folder-btn");
-
-const askFolder =
-  $("#ask-folder");
-
-const diagnoseBtn =
-  $("#diagnose-btn");
-
-const diagnosticResult =
-  $("#diagnostic-result");
-
-const diagnosticSummary =
-  $("#diagnostic-summary");
-
-const diagnosticItems =
-  $("#diagnostic-items");
-
-const diagnosticLog =
-  $("#diagnostic-log");
+const diagnosticCard  = $("#diagnostic-card");
+const diagnoseBtn     = $("#diagnose-btn");
+const diagnosticResult = $("#diagnostic-result");
 
 
-// ============================================================
+// ======================================================
 // 상태
-// ============================================================
+// ======================================================
 
-let currentFormat =
-  "mp3";
+let currentFormat = "mp3";
 
-let currentAbort =
-  null;
+let currentAbort = null;
 
-let diagnosisRunning =
-  false;
+let currentInfo = null;
 
 
-// ============================================================
-// 기기 감지
-// ============================================================
+// ======================================================
+// 기기
+// ======================================================
 
 function detectDevice() {
 
-  const ua =
-    navigator.userAgent;
+  const ua = navigator.userAgent;
 
-  if (
-    /iPhone|iPad|iPod/i.test(ua)
-  ) {
+  if (/iPhone|iPad|iPod/i.test(ua)) {
     return "ios";
   }
 
-  if (
-    /Android/i.test(ua)
-  ) {
+  if (/Android/i.test(ua)) {
     return "android";
   }
 
   return "pc";
 }
 
-
-const DEVICE =
-  detectDevice();
-
+const DEVICE = detectDevice();
 
 const HAS_FS_API =
   "showSaveFilePicker" in window;
 
 
-// ============================================================
-// 품질
-// ============================================================
+// ======================================================
+// MP3 기본 음질
+// ======================================================
 
-const QUALITY = {
+const MP3_QUALITY = [
+  "320 kbps",
+  "256 kbps",
+  "192 kbps",
+  "128 kbps",
+  "96 kbps"
+];
 
-  mp3: [
-    "320 kbps",
-    "256 kbps",
-    "192 kbps",
-    "128 kbps",
-    "96 kbps",
-  ],
 
-  m4a: [
-    "320 kbps",
-    "256 kbps",
-    "192 kbps",
-    "128 kbps",
-    "96 kbps",
-  ],
+// ======================================================
+// M4A
+// ======================================================
 
-  mp4: [
-    "최고 화질",
-    "2160p (4K)",
-    "1440p",
-    "1080p",
-    "720p",
-    "480p",
-    "360p",
-  ],
-};
+const M4A_QUALITY = [
+  "기본"
+];
 
+
+// ======================================================
+// 실제 MP4 화질
+// ======================================================
+
+let mp4Qualities = [
+  "1080p (기본)"
+];
+
+
+// ======================================================
+// 상태
+// ======================================================
+
+function setStatus(msg, kind = "info") {
+
+  statusEl.textContent = msg;
+
+  const colors = {
+    info: "#4a9eff",
+    ok: "#4caf50",
+    warn: "#ff9800",
+    err: "#e53935"
+  };
+
+  statusEl.style.color =
+    colors[kind] || "#888";
+}
+
+
+// ======================================================
+// MP4 실제 화질 정리
+// ======================================================
+
+function buildMp4Qualities(formats) {
+
+  if (!Array.isArray(formats)) {
+    return [
+      "1080p (기본)"
+    ];
+  }
+
+  const heights = [
+    ...new Set(
+      formats
+        .filter((f) => {
+
+          return (
+            f &&
+            f.height &&
+            Number(f.height) > 0 &&
+            (
+              f.ext === "mp4" ||
+              f.video_ext === "mp4"
+            )
+          );
+
+        })
+        .map((f) => Number(f.height))
+    )
+  ];
+
+  heights.sort((a, b) => b - a);
+
+  if (!heights.length) {
+
+    return [
+      "1080p (기본)"
+    ];
+
+  }
+
+  return heights.map((h, index) => {
+
+    if (index === 0) {
+      return `${h}p (기본)`;
+    }
+
+    return `${h}p`;
+  });
+}
+
+
+// ======================================================
+// 품질 UI
+// ======================================================
 
 function renderQuality() {
 
-  const options =
-    QUALITY[currentFormat];
+  let options = [];
+
+  if (currentFormat === "mp3") {
+
+    options = MP3_QUALITY;
+
+    qualityHint.textContent =
+      "MP3 음질";
+
+  }
+
+  else if (currentFormat === "m4a") {
+
+    options = M4A_QUALITY;
+
+    qualityHint.textContent =
+      "YouTube 기본 오디오";
+
+  }
+
+  else if (currentFormat === "mp4") {
+
+    options = mp4Qualities;
+
+    qualityHint.textContent =
+      "YouTube 제공 화질";
+
+  }
+
 
   qualitySel.innerHTML =
     options
-      .map(
-        (value) =>
-          `<option>${value}</option>`
+      .map((value) =>
+        `<option value="${value}">
+          ${value}
+        </option>`
       )
       .join("");
 
 
-  if (
-    currentFormat === "mp4"
-  ) {
-
-    qualitySel.value =
-      "최고 화질";
-
-    qualityHint.textContent =
-      "MP4 영상 화질";
-
-  } else {
+  if (currentFormat === "mp3") {
 
     qualitySel.value =
       "192 kbps";
 
-    qualityHint.textContent =
-      currentFormat === "m4a"
-        ? "M4A 음질"
-        : "MP3 음질";
+  }
+
+  else {
+
+    qualitySel.value =
+      options[0];
+
   }
 }
 
 
-// ============================================================
+// ======================================================
+// 영상 정보 가져오기
+// ======================================================
+
+async function loadVideoInfo() {
+
+  const url =
+    urlInput.value.trim();
+
+  if (!url) {
+    return null;
+  }
+
+
+  setStatus(
+    "YouTube 영상 정보를 확인하는 중...",
+    "info"
+  );
+
+
+  const response =
+    await fetch(
+      `${API_BASE}/api/info?url=${encodeURIComponent(url)}`
+    );
+
+
+  if (!response.ok) {
+
+    const text =
+      await response.text();
+
+    throw new Error(
+      text || `영상 정보 오류 (${response.status})`
+    );
+  }
+
+
+  const data =
+    await response.json();
+
+
+  currentInfo = data;
+
+
+  mp4Qualities =
+    buildMp4Qualities(
+      data.formats
+    );
+
+
+  if (currentFormat === "mp4") {
+    renderQuality();
+  }
+
+
+  return data;
+}
+
+
+// ======================================================
+// URL 변경 시 실제 포맷 조회
+// ======================================================
+
+let infoTimer = null;
+
+urlInput.addEventListener(
+  "change",
+  async () => {
+
+    try {
+
+      await loadVideoInfo();
+
+      setStatus(
+        "영상 정보를 확인했습니다.",
+        "ok"
+      );
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      setStatus(
+        "영상 정보 확인 실패: " +
+        err.message,
+        "warn"
+      );
+
+    }
+
+  }
+);
+
+
+// ======================================================
 // 기기 UI
-// ============================================================
+// ======================================================
 
 function initDeviceUI() {
 
   const label = {
-
-    ios:
-      "iPhone / iPad",
-
-    android:
-      "Android",
-
-    pc:
-      "PC",
-
+    ios: "iPhone / iPad",
+    android: "Android",
+    pc: "PC"
   }[DEVICE];
 
 
@@ -211,42 +352,31 @@ function initDeviceUI() {
   if (HAS_FS_API) {
 
     folderHint.textContent =
-      "PC · 저장 시 폴더 선택 가능";
+      "PC · 저장 시 파일 위치 선택 가능";
 
-    askFolder.checked =
-      true;
+    askFolder.checked = true;
 
-    askFolder.disabled =
-      false;
+    askFolder.disabled = false;
 
     pickFolder.textContent =
       "폴더 열기";
 
-    pickFolder.disabled =
-      true;
+    pickFolder.disabled = false;
 
     folderName.textContent =
       "저장할 때 선택";
 
-  } else {
+  }
 
-    askFolder.checked =
-      false;
+  else {
 
-    askFolder.disabled =
-      true;
+    askFolder.checked = false;
 
-    askFolder
-      .closest("label")
-      .style.opacity = "0.5";
+    askFolder.disabled = true;
 
-    pickFolder.disabled =
-      true;
+    pickFolder.disabled = true;
 
-
-    if (
-      DEVICE === "ios"
-    ) {
+    if (DEVICE === "ios") {
 
       folderHint.textContent =
         "Safari 다운로드 위치에 저장";
@@ -254,9 +384,9 @@ function initDeviceUI() {
       folderName.textContent =
         "파일 앱";
 
-    } else if (
-      DEVICE === "android"
-    ) {
+    }
+
+    else if (DEVICE === "android") {
 
       folderHint.textContent =
         "기본 다운로드 폴더에 저장";
@@ -264,156 +394,80 @@ function initDeviceUI() {
       folderName.textContent =
         "Download";
 
-    } else {
+    }
+
+    else {
 
       folderHint.textContent =
         "브라우저 기본 다운로드 폴더";
 
       folderName.textContent =
         "다운로드 폴더";
+
     }
+
   }
 }
 
 
-// ============================================================
+// ======================================================
 // 형식 버튼
-// ============================================================
+// ======================================================
 
 document
   .querySelectorAll(".chip")
-  .forEach((button) => {
+  .forEach((btn) => {
 
-    button.addEventListener(
+    btn.addEventListener(
       "click",
-      () => {
+      async () => {
 
         document
           .querySelectorAll(".chip")
-          .forEach(
-            (b) =>
-              b.classList.remove(
-                "active"
-              )
+          .forEach((b) =>
+            b.classList.remove("active")
           );
 
 
-        button.classList.add(
-          "active"
-        );
+        btn.classList.add("active");
 
 
         currentFormat =
-          button.dataset.format;
+          btn.dataset.format;
+
+
+        // MP4를 누르면 실제 화질 확인
+        if (
+          currentFormat === "mp4" &&
+          urlInput.value.trim()
+        ) {
+
+          try {
+
+            await loadVideoInfo();
+
+          }
+
+          catch (err) {
+
+            console.error(err);
+
+          }
+
+        }
 
 
         renderQuality();
+
       }
     );
 
   });
 
 
-// ============================================================
-// 상태
-// ============================================================
-
-function setStatus(
-  message,
-  kind = "info"
-) {
-
-  statusEl.textContent =
-    message;
-
-
-  const colors = {
-
-    info:
-      "#4a9eff",
-
-    ok:
-      "#4caf50",
-
-    warn:
-      "#ff9800",
-
-    err:
-      "#e53935",
-
-  };
-
-
-  statusEl.style.color =
-    colors[kind] || "#888";
-}
-
-
-// ============================================================
-// 파일명
-// ============================================================
-
-function getFilename(
-  response
-) {
-
-  const fallback = {
-
-    mp3:
-      "audio.mp3",
-
-    m4a:
-      "audio.m4a",
-
-    mp4:
-      "video.mp4",
-
-  }[currentFormat];
-
-
-  const disposition =
-    response.headers.get(
-      "content-disposition"
-    ) || "";
-
-
-  const utf8Match =
-    disposition.match(
-      /filename\*=UTF-8''([^;]+)/i
-    );
-
-
-  if (utf8Match) {
-
-    try {
-
-      return decodeURIComponent(
-        utf8Match[1]
-      );
-
-    } catch (_) {}
-  }
-
-
-  const normalMatch =
-    disposition.match(
-      /filename="?([^";]+)"?/i
-    );
-
-
-  if (normalMatch) {
-
-    return normalMatch[1];
-  }
-
-
-  return fallback;
-}
-
-
-// ============================================================
+// ======================================================
 // 다운로드
-// ============================================================
+// ======================================================
 
 downloadBtn.addEventListener(
   "click",
@@ -440,28 +494,39 @@ async function startDownload() {
   }
 
 
+  // MP4이면 실제 영상 정보를 먼저 확인
+  if (currentFormat === "mp4") {
+
+    try {
+
+      await loadVideoInfo();
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+    }
+
+  }
+
+
   const quality =
     qualitySel.value;
 
 
   const params =
     new URLSearchParams({
-
       url,
-
-      format:
-        currentFormat,
-
-      quality,
-
+      format: currentFormat,
+      quality
     });
 
 
-  downloadBtn.disabled =
-    true;
+  downloadBtn.disabled = true;
 
-  cancelBtn.disabled =
-    false;
+  cancelBtn.disabled = false;
 
 
   progressBar.style.width =
@@ -469,7 +534,7 @@ async function startDownload() {
 
 
   setStatus(
-    "서버 준비 중... 첫 요청은 시간이 걸릴 수 있습니다.",
+    "서버 준비 중...",
     "info"
   );
 
@@ -482,10 +547,10 @@ async function startDownload() {
 
     const response =
       await fetch(
-        `${API_BASE}/api/download?${params.toString()}`,
+        `${API_BASE}/api/download?${params}`,
         {
           signal:
-            currentAbort.signal,
+            currentAbort.signal
         }
       );
 
@@ -493,31 +558,67 @@ async function startDownload() {
     if (!response.ok) {
 
       const text =
-        await response
-          .text()
-          .catch(
-            () => ""
-          );
+        await response.text()
+          .catch(() => "");
 
 
       throw new Error(
         text ||
         `서버 오류 (${response.status})`
       );
+
     }
 
 
-    const filename =
-      getFilename(
-        response
+    // 파일명
+    let filename;
+
+
+    if (currentFormat === "mp3") {
+      filename = "audio.mp3";
+    }
+
+    else if (currentFormat === "m4a") {
+      filename = "audio.m4a";
+    }
+
+    else {
+      filename = "video.mp4";
+    }
+
+
+    const cd =
+      response.headers
+        .get("content-disposition") || "";
+
+
+    const match =
+      cd.match(
+        /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i
       );
 
 
+    if (match) {
+
+      try {
+
+        filename =
+          decodeURIComponent(
+            match[1]
+          );
+
+      }
+
+      catch (_) {}
+
+    }
+
+
+    // 파일 읽기
     const total =
       parseInt(
-        response.headers.get(
-          "content-length"
-        ) || "0",
+        response.headers
+          .get("content-length") || "0",
         10
       );
 
@@ -526,11 +627,9 @@ async function startDownload() {
       response.body.getReader();
 
 
-    const chunks =
-      [];
+    const chunks = [];
 
-    let received =
-      0;
+    let received = 0;
 
 
     while (true) {
@@ -547,73 +646,60 @@ async function startDownload() {
       }
 
 
-      chunks.push(
-        value
-      );
+      chunks.push(value);
 
-
-      received +=
-        value.length;
+      received += value.length;
 
 
       if (total) {
 
-        const percent =
+        const pct =
           Math.min(
             100,
-            (
-              received /
-              total
-            ) * 100
+            (received / total) * 100
           );
 
 
         progressBar.style.width =
-          `${percent.toFixed(1)}%`;
+          pct.toFixed(1) + "%";
 
 
         setStatus(
-          `다운로드 중... ${percent.toFixed(1)}%`,
+          `다운로드 중... ${pct.toFixed(1)}%`,
           "info"
         );
 
-      } else {
-
-        setStatus(
-          `다운로드 중... ${(received / 1024 / 1024).toFixed(1)} MB`,
-          "info"
-        );
       }
+
+      else {
+
+        setStatus(
+          `다운로드 중... ` +
+          `${(received / 1024 / 1024).toFixed(1)} MB`,
+          "info"
+        );
+
+      }
+
     }
 
 
-    const mime = {
-
-      mp3:
-        "audio/mpeg",
-
-      m4a:
-        "audio/mp4",
-
-      mp4:
-        "video/mp4",
-
-    }[currentFormat];
+    const mime =
+      currentFormat === "mp3"
+        ? "audio/mpeg"
+        : currentFormat === "m4a"
+          ? "audio/mp4"
+          : "video/mp4";
 
 
     const blob =
       new Blob(
         chunks,
-        {
-          type: mime
-        }
+        { type: mime }
       );
 
 
-    // ========================================================
-    // PC 저장 대화상자
-    // ========================================================
-
+    // PC 저장 위치 선택
     if (
       HAS_FS_API &&
       askFolder.checked
@@ -623,9 +709,7 @@ async function startDownload() {
 
         const handle =
           await window.showSaveFilePicker({
-
-            suggestedName:
-              filename,
+            suggestedName: filename
           });
 
 
@@ -633,10 +717,7 @@ async function startDownload() {
           await handle.createWritable();
 
 
-        await writable.write(
-          blob
-        );
-
+        await writable.write(blob);
 
         await writable.close();
 
@@ -645,20 +726,17 @@ async function startDownload() {
           handle.name;
 
 
-        progressBar.style.width =
-          "100%";
-
-
         setStatus(
           "저장 완료!",
           "ok"
         );
 
-      } catch (error) {
+      }
+
+      catch (err) {
 
         if (
-          error.name ===
-          "AbortError"
+          err.name === "AbortError"
         ) {
 
           setStatus(
@@ -666,73 +744,62 @@ async function startDownload() {
             "warn"
           );
 
-        } else {
-
-          throw error;
         }
+
+        else {
+
+          throw err;
+
+        }
+
       }
 
-    } else {
+    }
 
-      // ======================================================
-      // 모바일 / 일반 브라우저 다운로드
-      // ======================================================
+    else {
 
       const objectUrl =
-        URL.createObjectURL(
-          blob
-        );
+        URL.createObjectURL(blob);
 
 
-      const anchor =
-        document.createElement(
-          "a"
-        );
+      const a =
+        document.createElement("a");
 
 
-      anchor.href =
+      a.href =
         objectUrl;
 
-      anchor.download =
+      a.download =
         filename;
 
 
-      document.body.appendChild(
-        anchor
-      );
+      document.body.appendChild(a);
 
+      a.click();
 
-      anchor.click();
-
-
-      anchor.remove();
+      a.remove();
 
 
       setTimeout(
         () =>
-          URL.revokeObjectURL(
-            objectUrl
-          ),
+          URL.revokeObjectURL(objectUrl),
         30000
       );
 
 
-      progressBar.style.width =
-        "100%";
-
-
       setStatus(
-        "다운로드 완료! 저장 위치를 확인하세요.",
+        "다운로드 완료!",
         "ok"
       );
+
     }
 
+  }
 
-  } catch (error) {
+  catch (err) {
 
     if (
-      error.name ===
-      "AbortError"
+      err.name === "AbortError"
     ) {
 
       setStatus(
@@ -740,31 +807,32 @@ async function startDownload() {
         "warn"
       );
 
-    } else {
+    }
 
-      console.error(
-        error
-      );
+    else {
+
+      console.error(err);
 
 
       setStatus(
-        "다운로드 실패. 자동 진단을 시작합니다.",
+        "다운로드 실패: " +
+        err.message,
         "err"
       );
 
 
-      // ======================================================
-      // ★ 다운로드 실패 → 자동 진단
-      // ======================================================
+      // 실패하면 진단창 표시
+      diagnosticCard.hidden =
+        false;
 
-      await runDiagnosis(
-        url,
-        true
-      );
+
+      diagnoseVideo();
+
     }
 
+  }
 
-  } finally {
+  finally {
 
     downloadBtn.disabled =
       false;
@@ -774,21 +842,20 @@ async function startDownload() {
 
     currentAbort =
       null;
+
   }
 }
 
 
-// ============================================================
+// ======================================================
 // 취소
-// ============================================================
+// ======================================================
 
 cancelBtn.addEventListener(
   "click",
   () => {
 
-    if (
-      currentAbort
-    ) {
+    if (currentAbort) {
 
       currentAbort.abort();
 
@@ -796,14 +863,16 @@ cancelBtn.addEventListener(
         "취소 중...",
         "warn"
       );
+
     }
+
   }
 );
 
 
-// ============================================================
-// 폴더 열기
-// ============================================================
+// ======================================================
+// 폴더
+// ======================================================
 
 pickFolder.addEventListener(
   "click",
@@ -827,127 +896,75 @@ pickFolder.addEventListener(
 
 
       setStatus(
-        "저장 시 이 폴더를 지정할 수 있습니다.",
+        "저장 위치를 선택했습니다.",
         "info"
       );
 
-    } catch (error) {
+    }
+
+    catch (err) {
 
       if (
-        error.name !==
-        "AbortError"
+        err.name !== "AbortError"
       ) {
 
-        console.error(
-          error
-        );
+        console.error(err);
+
       }
+
     }
+
   }
 );
 
 
-// ============================================================
-// 진단 버튼
-// ============================================================
+// ======================================================
+// 진단
+// ======================================================
 
 diagnoseBtn.addEventListener(
   "click",
-  () => {
-
-    const url =
-      urlInput.value.trim();
-
-
-    if (!url) {
-
-      setStatus(
-        "먼저 YouTube URL을 입력하세요.",
-        "warn"
-      );
-
-      urlInput.focus();
-
-      return;
-    }
-
-
-    runDiagnosis(
-      url,
-      false
-    );
-  }
+  diagnoseVideo
 );
 
 
-// ============================================================
-// 진단 실행
-// ============================================================
+async function diagnoseVideo() {
 
-async function runDiagnosis(
-  url,
-  automatic
-) {
+  const url =
+    urlInput.value.trim();
 
-  if (
-    diagnosisRunning
-  ) {
+
+  if (!url) {
+
+    diagnosticResult.innerHTML =
+      `<div class="diag-summary">
+        YouTube URL을 먼저 입력하세요.
+      </div>`;
+
     return;
+
   }
 
 
-  diagnosisRunning =
-    true;
+  diagnosticCard.hidden =
+    false;
 
 
   diagnoseBtn.disabled =
     true;
 
 
-  diagnosticResult.classList.remove(
-    "hidden"
-  );
-
-
-  diagnosticSummary.innerHTML =
-    `<div class="diagnostic-loading">
-      서버 진단 중입니다...
+  diagnosticResult.innerHTML =
+    `<div class="diag-summary">
+      YouTube 연결 상태를 확인하는 중...
     </div>`;
-
-
-  diagnosticItems.innerHTML =
-    "";
-
-
-  diagnosticLog.textContent =
-    "";
-
-
-  if (automatic) {
-
-    setStatus(
-      "다운로드 실패 → YouTube 연결 진단 중...",
-      "warn"
-    );
-
-  } else {
-
-    setStatus(
-      "YouTube 연결 진단 중...",
-      "info"
-    );
-  }
 
 
   try {
 
     const response =
       await fetch(
-        `${API_BASE}/api/diagnose?url=${encodeURIComponent(url)}`,
-        {
-          cache:
-            "no-store",
-        }
+        `${API_BASE}/api/diagnose?url=${encodeURIComponent(url)}`
       );
 
 
@@ -955,448 +972,244 @@ async function runDiagnosis(
       await response.json();
 
 
-    if (!response.ok) {
+    renderDiagnosis(data);
 
-      throw new Error(
-        data.detail ||
-        `진단 서버 오류 (${response.status})`
-      );
-    }
+  }
 
+  catch (err) {
 
-    renderDiagnosis(
-      data
-    );
+    diagnosticResult.innerHTML =
+      `<div class="diag-summary diag-error">
+        진단 요청 실패
+        <br>
+        ${escapeHtml(err.message)}
+      </div>`;
 
+  }
 
-    setStatus(
-      "진단 완료",
-      "ok"
-    );
-
-  } catch (error) {
-
-    console.error(
-      error
-    );
-
-
-    diagnosticSummary.innerHTML =
-      `
-      <div class="diagnostic-error">
-        진단 서버에 연결하지 못했습니다.
-      </div>
-      `;
-
-
-    diagnosticLog.textContent =
-      error.message;
-
-
-    setStatus(
-      "진단 실패: " +
-      error.message,
-      "err"
-    );
-
-  } finally {
-
-    diagnosisRunning =
-      false;
+  finally {
 
     diagnoseBtn.disabled =
       false;
+
   }
 }
 
 
-// ============================================================
+// ======================================================
 // 진단 결과 표시
-// ============================================================
+// ======================================================
 
-function renderDiagnosis(
-  data
-) {
+function renderDiagnosis(data) {
 
   const diagnosis =
     data.diagnosis || {};
 
 
-  const code =
-    diagnosis.code ||
-    "UNKNOWN";
+  const title =
+    diagnosis.title ||
+    data.message ||
+    "진단 결과";
 
 
-  const message =
-    diagnosis.message ||
-    "진단 결과가 없습니다.";
+  const level =
+    diagnosis.level ||
+    "warn";
 
 
-  const isGood =
-    data.player_response &&
-    data.player_response.success;
+  const css =
+    level === "ok"
+      ? "diag-good"
+      : level === "error"
+        ? "diag-error"
+        : "diag-warn";
 
 
-  let summaryClass =
-    "diagnostic-summary";
+  let html = `
 
+    <div class="diag-summary">
 
-  if (
-    code === "YOUTUBE_429" ||
-    code === "YOUTUBE_BOT_CHECK"
-  ) {
+      <div class="diag-title ${css}">
+        ${escapeHtml(title)}
+      </div>
 
-    summaryClass +=
-      " warning";
+      <div class="diag-row">
+        <span class="diag-label">
+          yt-dlp
+        </span>
 
-  } else if (
-    code === "UNKNOWN"
-  ) {
+        <span class="diag-value">
+          ${escapeHtml(
+            data.yt_dlp || "-"
+          )}
+        </span>
+      </div>
 
-    summaryClass +=
-      " warning";
+      <div class="diag-row">
+        <span class="diag-label">
+          YouTube 연결
+        </span>
 
-  } else if (
-    isGood
-  ) {
+        <span class="diag-value">
+          ${escapeHtml(
+            data.youtube_http || "-"
+          )}
+        </span>
+      </div>
 
-    summaryClass +=
-      " success";
+      <div class="diag-row">
+        <span class="diag-label">
+          BgUtils / PO Token
+        </span>
 
-  } else {
+        <span class="diag-value">
+          ${escapeHtml(
+            data.bgutil || "-"
+          )}
+        </span>
+      </div>
 
-    summaryClass +=
-      " danger";
-  }
+      <div class="diag-row">
+        <span class="diag-label">
+          FFmpeg
+        </span>
 
+        <span class="diag-value">
+          ${escapeHtml(
+            data.ffmpeg || "-"
+          )}
+        </span>
+      </div>
 
-  diagnosticSummary.className =
-    summaryClass;
-
-
-  diagnosticSummary.innerHTML =
-
-    `<strong>${escapeHtml(message)}</strong>
-     <span class="diagnostic-code">
-       ${escapeHtml(code)}
-     </span>`;
-
-
-  const items =
-    [];
-
-
-  const environment =
-    data.environment || {};
-
-
-  // yt-dlp
-
-  items.push(
-    diagnosticItem(
-      "yt-dlp",
-      environment.yt_dlp ||
-        "확인 실패",
-      Boolean(
-        environment.yt_dlp
-      )
-    )
-  );
-
-
-  // Deno
-
-  items.push(
-    diagnosticItem(
-      "JS Runtime",
-      environment.deno?.available
-        ? (
-            environment.deno.version ||
-            "Deno"
-          )
-        : "없음",
-      Boolean(
-        environment.deno?.available
-      )
-    )
-  );
-
-
-  // FFmpeg
-
-  items.push(
-    diagnosticItem(
-      "FFmpeg",
-      environment.ffmpeg?.available
-        ? (
-            environment.ffmpeg.version ||
-            "정상"
-          )
-        : "없음",
-      Boolean(
-        environment.ffmpeg?.available
-      )
-    )
-  );
-
-
-  // Cookie
-
-  const cookies =
-    environment.cookies ||
-    {};
-
-
-  items.push(
-    diagnosticItem(
-      "Cookie",
-      !cookies.configured
-        ? "미설정"
-        : cookies.valid_structure
-          ? `정상 구조 (${cookies.cookie_count}개)`
-          : "형식 확인 필요",
-      Boolean(
-        cookies.configured &&
-        cookies.valid_structure
-      )
-    )
-  );
-
-
-  // BgUtils
-
-  const bgutil =
-    environment.bgutil ||
-    {};
-
-
-  items.push(
-    diagnosticItem(
-      "BgUtils / PO Token",
-      bgutil.tcp
-        ? "연결 정상"
-        : "연결 실패",
-      Boolean(
-        bgutil.tcp
-      )
-    )
-  );
-
-
-  // YouTube HTTP
-
-  const http =
-    data.youtube_http ||
-    {};
-
-
-  let httpText =
-    "확인 실패";
-
-
-  if (
-    http.status
-  ) {
-
-    httpText =
-      `HTTP ${http.status}`;
-  }
-
-
-  items.push(
-    diagnosticItem(
-      "YouTube 연결",
-      httpText,
-      http.status === 200
-    )
-  );
-
-
-  // Player Response
-
-  const player =
-    data.player_response ||
-    {};
-
-
-  items.push(
-    diagnosticItem(
-      "Player Response",
-      player.success
-        ? `성공 (${player.format_count || 0} formats)`
-        : "실패",
-      Boolean(
-        player.success
-      )
-    )
-  );
+    </div>
+  `;
 
 
   // Client 결과
-
-  const clients =
-    data.clients || [];
-
-
   if (
-    clients.length
+    Array.isArray(
+      data.clients
+    )
   ) {
 
-    clients.forEach(
-      (client) => {
+    html += `
+      <div class="diag-summary">
 
-        items.push(
-          diagnosticItem(
-            client.client,
-            client.success
-              ? "성공"
-              : "실패",
-            Boolean(
-              client.success
-            )
-          )
-        );
-      }
-    );
+        <div class="diag-title">
+          Player Client 비교
+        </div>
+    `;
+
+
+    for (
+      const client of data.clients
+    ) {
+
+      const ok =
+        client.ok === true;
+
+
+      html += `
+        <div class="diag-row">
+
+          <span class="diag-label">
+            ${escapeHtml(
+              client.client || "-"
+            )}
+          </span>
+
+          <span class="diag-value ${
+            ok
+              ? "diag-good"
+              : "diag-error"
+          }">
+
+            ${ok ? "성공" : "실패"}
+
+          </span>
+
+        </div>
+      `;
+
+    }
+
+
+    html += `
+      </div>
+    `;
+
   }
 
 
-  diagnosticItems.innerHTML =
-    items.join("");
+  // 상세
+  const raw =
+    data.raw ||
+    data.error ||
+    data.details ||
+    "";
 
 
-  // 상세 로그
+  if (raw) {
 
-  const logObject = {
+    html += `
+      <details class="diag-details">
 
-    diagnosis:
-      data.diagnosis,
+        <summary>
+          상세 진단 정보
+        </summary>
 
-    environment:
-      data.environment,
+        <pre class="diag-pre">
+${escapeHtml(
+  typeof raw === "string"
+    ? raw
+    : JSON.stringify(
+        raw,
+        null,
+        2
+      )
+)}
+        </pre>
 
-    youtube_http:
-      data.youtube_http,
+      </details>
+    `;
 
-    player_response:
-      data.player_response,
-
-    clients:
-      data.clients,
-
-  };
+  }
 
 
-  diagnosticLog.textContent =
-    JSON.stringify(
-      logObject,
-      null,
-      2
-    );
+  diagnosticResult.innerHTML =
+    html;
 }
 
 
-// ============================================================
-// 진단 한 줄
-// ============================================================
-
-function diagnosticItem(
-  name,
-  value,
-  success
-) {
-
-  const className =
-    success
-      ? "diagnostic-ok"
-      : "diagnostic-fail";
-
-
-  const symbol =
-    success
-      ? "✓"
-      : "⚠";
-
-
-  return `
-
-    <div class="diagnostic-item">
-
-      <span class="diagnostic-item-name">
-        ${escapeHtml(name)}
-      </span>
-
-      <span class="${className}">
-
-        <b>${symbol}</b>
-
-        ${escapeHtml(
-          String(value)
-        )}
-
-      </span>
-
-    </div>
-
-  `;
-}
-
-
-// ============================================================
+// ======================================================
 // HTML escape
-// ============================================================
+// ======================================================
 
-function escapeHtml(
-  value
-) {
+function escapeHtml(value) {
 
-  return String(
-    value
-  )
-
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-
-    .replace(
-      /</g,
-      "&lt;"
-    )
-
-    .replace(
-      />/g,
-      "&gt;"
-    )
-
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-
-    .replace(
-      /'/g,
-      "&#039;"
-    );
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 
-// ============================================================
+// ======================================================
 // 초기화
-// ============================================================
+// ======================================================
 
 initDeviceUI();
 
 renderQuality();
 
-
-// URL이 있으면 자동 진단 가능하도록 유지
 urlInput.focus();
 
 
-// ============================================================
+// ======================================================
 // Service Worker
-// ============================================================
+// ======================================================
 
 if (
   "serviceWorker" in navigator
@@ -1406,7 +1219,6 @@ if (
     .register(
       "service-worker.js"
     )
-    .catch(
-      () => {}
-    );
+    .catch(() => {});
+
 }
