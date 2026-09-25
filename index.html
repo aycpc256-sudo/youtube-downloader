@@ -1,1 +1,328 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#111827"><title>YouTube Downloader</title><link rel="manifest" href="./manifest.json"><link rel="stylesheet" href="./styles.css"></head><body><main class="wrap"><section class="card"><h1>YouTube Downloader</h1><p class="sub">개인용 · 광고 없음 · MP3 / M4A / MP4</p><label for="url">YouTube 주소</label><input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..."><div class="row"><div><label>형식</label><div class="seg"><label><input type="radio" name="format" value="mp3" checked> MP3</label><label><input type="radio" name="format" value="m4a"> M4A</label><label><input type="radio" name="format" value="mp4"> MP4</label></div></div><div><label for="quality">품질</label><select id="quality"></select></div></div><button id="downloadBtn" class="primary">다운로드</button><button id="cancelBtn" class="danger" disabled>취소</button><div class="progressWrap"><div class="progress"><div id="bar"></div></div><div class="status" id="status">대기 중</div></div><div class="hint">브라우저의 다운로드 권한과 기기 저장 정책에 따라 저장 위치가 달라질 수 있습니다.</div></section><footer>다운로드 권한이 있는 콘텐츠만 사용하세요.</footer></main><script src="./app.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  />
+
+  <meta name="theme-color" content="#111111" />
+
+  <meta
+    name="apple-mobile-web-app-capable"
+    content="yes"
+  />
+
+  <meta
+    name="apple-mobile-web-app-status-bar-style"
+    content="black"
+  />
+
+  <meta
+    name="apple-mobile-web-app-title"
+    content="Downloader"
+  />
+
+  <link
+    rel="manifest"
+    href="manifest.json"
+  />
+
+  <link
+    rel="apple-touch-icon"
+    href="icons/icon-192.png"
+  />
+
+  <link
+    rel="stylesheet"
+    href="styles.css?v=diag-1"
+  />
+
+  <title>YouTube Downloader</title>
+</head>
+
+<body>
+
+  <main class="app">
+
+    <header class="header">
+
+      <h1>YouTube Downloader</h1>
+
+      <p
+        class="subtitle"
+        id="device-label"
+      >
+        기기 감지 중...
+      </p>
+
+    </header>
+
+
+    <!-- URL -->
+
+    <section class="card">
+
+      <label
+        for="url"
+        class="label"
+      >
+        YouTube URL
+      </label>
+
+      <input
+        id="url"
+        type="url"
+        inputmode="url"
+        placeholder="https://youtu.be/..."
+        autocomplete="off"
+      />
+
+    </section>
+
+
+    <!-- 형식 -->
+
+    <section class="card">
+
+      <div class="label">
+        다운로드 형식
+      </div>
+
+      <div class="row format-row">
+
+        <button
+          class="chip active"
+          data-format="mp3"
+        >
+          MP3
+        </button>
+
+        <button
+          class="chip"
+          data-format="m4a"
+        >
+          M4A
+        </button>
+
+        <button
+          class="chip"
+          data-format="mp4"
+        >
+          MP4
+        </button>
+
+      </div>
+
+
+      <div
+        class="label quality-label"
+      >
+
+        품질
+
+        <span
+          id="quality-hint"
+          class="hint"
+        >
+          MP3 음질
+        </span>
+
+      </div>
+
+      <select id="quality"></select>
+
+    </section>
+
+
+    <!-- 저장 폴더 -->
+
+    <section
+      class="card"
+      id="folder-card"
+    >
+
+      <div class="row between">
+
+        <div
+          class="label"
+          style="margin:0;"
+        >
+          저장 폴더
+        </div>
+
+        <span
+          class="hint"
+          id="folder-hint"
+        ></span>
+
+      </div>
+
+
+      <div
+        class="folder-row"
+      >
+
+        <span
+          id="folder-name"
+          class="folder-name"
+        >
+          기본 다운로드 폴더
+        </span>
+
+        <button
+          id="pick-folder-btn"
+          class="ghost"
+        >
+          폴더 열기
+        </button>
+
+      </div>
+
+    </section>
+
+
+    <!-- PC 저장 옵션 -->
+
+    <section class="card">
+
+      <label class="check">
+
+        <input
+          type="checkbox"
+          id="ask-folder"
+        />
+
+        <span>
+          저장할 때 폴더 선택 (PC만 지원)
+        </span>
+
+      </label>
+
+    </section>
+
+
+    <!-- 다운로드 -->
+
+    <button
+      id="download-btn"
+      class="primary"
+    >
+      다운로드
+    </button>
+
+
+    <button
+      id="cancel-btn"
+      class="secondary"
+      disabled
+    >
+      취소
+    </button>
+
+
+    <!-- 진행률 -->
+
+    <div class="progress-wrap">
+
+      <div
+        class="progress-bar"
+        id="progress-bar"
+      ></div>
+
+    </div>
+
+
+    <p
+      class="status"
+      id="status"
+    >
+      대기 중
+    </p>
+
+
+    <!-- =====================================================
+         YouTube 연결 진단
+         ===================================================== -->
+
+    <section
+      class="card diagnostic-card"
+      id="diagnostic-card"
+    >
+
+      <div class="diagnostic-header">
+
+        <div>
+
+          <div class="diagnostic-title">
+            YouTube 연결 진단
+          </div>
+
+          <div class="diagnostic-subtitle">
+            다운로드 실패 원인을 서버에서 검사합니다.
+          </div>
+
+        </div>
+
+
+        <button
+          id="diagnose-btn"
+          class="diagnose-button"
+        >
+          진단
+        </button>
+
+      </div>
+
+
+      <!-- 진단 결과 -->
+
+      <div
+        id="diagnostic-result"
+        class="diagnostic-result hidden"
+      >
+
+        <div
+          id="diagnostic-summary"
+          class="diagnostic-summary"
+        ></div>
+
+
+        <div
+          id="diagnostic-items"
+          class="diagnostic-items"
+        ></div>
+
+
+        <details class="diagnostic-details">
+
+          <summary>
+            상세 진단 정보
+          </summary>
+
+          <pre
+            id="diagnostic-log"
+          ></pre>
+
+        </details>
+
+      </div>
+
+    </section>
+
+
+    <footer class="footer">
+
+      개인용 · 본인이 소유하거나 다운로드 권한이 있는 콘텐츠에만 사용하세요.
+
+    </footer>
+
+  </main>
+
+
+  <script src="app.js?v=diag-1"></script>
+
+</body>
+</html>
