@@ -10,10 +10,8 @@ import urllib.error
 import urllib.request
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Optional
 
 import yt_dlp
-
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -24,10 +22,7 @@ from starlette.background import BackgroundTask
 # FastAPI
 # ============================================================
 
-app = FastAPI(
-    title="YouTube Downloader API",
-    version="2.0-diagnostic",
-)
+app = FastAPI(title="YouTube Downloader API")
 
 
 # ============================================================
@@ -68,7 +63,7 @@ RE_URL = re.compile(
 
 
 # ============================================================
-# 공통 함수
+# 공통 유틸
 # ============================================================
 
 def validate_url(url: str):
@@ -81,56 +76,61 @@ def validate_url(url: str):
 
 def safe_filename(name: str) -> str:
     name = re.sub(
-        r'["\\/\r\n\x00-\x1f]',
+        r'["\\\r\n\x00-\x1f]',
         "",
         name
     )
-
     return name.strip() or "download"
 
 
-def get_yt_dlp_version():
+def command_exists(command: str) -> bool:
+    return shutil.which(command) is not None
+
+
+def get_command_version(command: str):
     try:
-        return pkg_version("yt-dlp")
+        proc = subprocess.run(
+            [command, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        output = (
+            proc.stdout or proc.stderr or ""
+        ).strip()
+
+        return output.splitlines()[0][:300] if output else None
+
     except Exception:
-        return "unknown"
+        return None
 
 
 # ============================================================
-# Cookie
+# YouTube 쿠키
+#
+# Render Environment Variable:
+# YOUTUBE_COOKIES
+#
+# 실제 cookie 내용은 API 응답으로 절대 반환하지 않음.
 # ============================================================
 
-def get_raw_cookie_value() -> str:
-    return os.environ.get(
+def prepare_youtube_cookies():
+
+    raw_value = os.environ.get(
         "YOUTUBE_COOKIES",
         ""
     ).strip()
 
-
-def prepare_youtube_cookies():
-    """
-    Render Environment Variable:
-
-        YOUTUBE_COOKIES
-
-    내용을 /tmp/youtube-cookies.txt 로 생성한다.
-
-    쿠키 값 자체는 로그에 출력하지 않는다.
-    """
-
-    raw_value = get_raw_cookie_value()
-
     if not raw_value:
         return None
 
+    cookie_path = "/tmp/youtube-cookies.txt"
+
     cookie_text = raw_value
 
-    # --------------------------------------------------------
-    # Base64로 저장된 경우 지원
-    # --------------------------------------------------------
-
+    # Base64 형태도 허용
     if not raw_value.startswith("#"):
-
         try:
             decoded = base64.b64decode(
                 raw_value,
@@ -153,9 +153,8 @@ def prepare_youtube_cookies():
         except Exception:
             pass
 
-    cookie_path = "/tmp/youtube-cookies.txt"
-
     try:
+
         with open(
             cookie_path,
             "w",
@@ -177,37 +176,34 @@ def prepare_youtube_cookies():
         )
 
 
+# ============================================================
+# Cookie 구조 진단
+# ============================================================
+
 def inspect_cookie_configuration():
-    """
-    쿠키 내용 자체는 절대 반환하지 않는다.
-    """
 
-    raw = get_raw_cookie_value()
-
-    result = {
-        "configured": bool(raw),
-        "format": "not_configured",
-        "valid_structure": False,
-        "line_count": 0,
-        "cookie_count": 0,
-        "youtube_domain_count": 0,
-        "message": "",
-    }
+    raw = os.environ.get(
+        "YOUTUBE_COOKIES",
+        ""
+    ).strip()
 
     if not raw:
-        result["message"] = (
-            "YOUTUBE_COOKIES 환경변수가 없습니다."
-        )
-        return result
+        return {
+            "configured": False,
+            "valid_structure": False,
+            "line_count": 0,
+            "cookie_count": 0,
+        }
 
     text = raw
 
-    # Base64 가능성
-    if not raw.startswith("#"):
+    # Base64라면 디코드
+    if not text.startswith("#"):
 
         try:
+
             decoded = base64.b64decode(
-                raw,
+                text,
                 validate=True
             ).decode(
                 "utf-8",
@@ -222,248 +218,30 @@ def inspect_cookie_configuration():
 
     lines = text.splitlines()
 
-    result["line_count"] = len(lines)
+    data_lines = [
+        line
+        for line in lines
+        if line.strip()
+        and not line.lstrip().startswith("#")
+    ]
 
-    first_line = ""
+    valid_rows = 0
 
-    for line in lines:
-        if line.strip():
-            first_line = line.strip()
-            break
+    for line in data_lines:
 
-    if first_line == "# Netscape HTTP Cookie File":
-        result["format"] = "netscape"
-    elif first_line == "# HTTP Cookie File":
-        result["format"] = "http_cookie"
-    else:
-        result["format"] = "unknown"
+        fields = line.split("\t")
 
-    cookie_count = 0
-    youtube_domain_count = 0
-
-    for line in lines:
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        if line.startswith("#"):
-            continue
-
-        parts = line.split("\t")
-
-        if len(parts) >= 7:
-
-            cookie_count += 1
-
-            domain = parts[0].lower()
-
-            if (
-                "youtube.com" in domain
-                or "google.com" in domain
-                or "googleusercontent.com" in domain
-            ):
-                youtube_domain_count += 1
-
-    result["cookie_count"] = cookie_count
-    result["youtube_domain_count"] = youtube_domain_count
-
-    result["valid_structure"] = (
-        result["format"] in (
-            "netscape",
-            "http_cookie",
-        )
-        and cookie_count > 0
-    )
-
-    if not result["valid_structure"]:
-        result["message"] = (
-            "쿠키 파일 구조를 확인해야 합니다."
-        )
-    elif youtube_domain_count == 0:
-        result["message"] = (
-            "쿠키 구조는 정상이나 YouTube 관련 쿠키가 없습니다."
-        )
-    else:
-        result["message"] = (
-            "쿠키 파일 구조가 정상입니다."
-        )
-
-    return result
-
-
-# ============================================================
-# BgUtils
-# ============================================================
-
-def check_bgutil():
-    result = {
-        "ok": False,
-        "tcp": False,
-        "ping": False,
-        "ping_response": None,
-        "error": None,
-    }
-
-    # TCP
-    try:
-
-        sock = socket.create_connection(
-            ("127.0.0.1", BGUTIL_PORT),
-            timeout=3
-        )
-
-        sock.close()
-
-        result["tcp"] = True
-
-    except Exception as e:
-
-        result["error"] = str(e)
-
-    # HTTP ping
-    try:
-
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{BGUTIL_PORT}/ping",
-            timeout=5
-        ) as response:
-
-            body = (
-                response.read()
-                .decode(
-                    errors="ignore"
-                )
-            )
-
-            result["ping"] = True
-            result["ping_response"] = body[:300]
-
-    except Exception as e:
-
-        if not result["error"]:
-            result["error"] = str(e)
-
-    result["ok"] = (
-        result["tcp"]
-        and result["ping"]
-    )
-
-    return result
-
-
-# ============================================================
-# FFmpeg
-# ============================================================
-
-def check_ffmpeg():
-
-    path = shutil.which("ffmpeg")
-
-    if not path:
-        return {
-            "ok": False,
-            "path": None,
-            "version": None,
-        }
-
-    version_text = None
-
-    try:
-
-        proc = subprocess.run(
-            [
-                path,
-                "-version"
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-
-        first_line = (
-            proc.stdout or ""
-        ).splitlines()
-
-        if first_line:
-            version_text = first_line[0]
-
-    except Exception:
-        pass
+        if len(fields) >= 7:
+            valid_rows += 1
 
     return {
-        "ok": True,
-        "path": path,
-        "version": version_text,
+        "configured": True,
+        "valid_structure": (
+            valid_rows > 0
+        ),
+        "line_count": len(lines),
+        "cookie_count": valid_rows,
     }
-
-
-# ============================================================
-# YouTube HTTP 연결
-# ============================================================
-
-def check_youtube_http():
-
-    result = {
-        "ok": False,
-        "status": None,
-        "message": "",
-    }
-
-    url = "https://www.youtube.com/generate_204"
-
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/131.0.0.0 Safari/537.36"
-            )
-        }
-    )
-
-    try:
-
-        with urllib.request.urlopen(
-            request,
-            timeout=15
-        ) as response:
-
-            result["status"] = response.status
-            result["ok"] = (
-                200 <= response.status < 400
-            )
-
-            result["message"] = (
-                "YouTube 기본 연결 성공"
-            )
-
-    except urllib.error.HTTPError as e:
-
-        result["status"] = e.code
-
-        if e.code == 429:
-            result["message"] = (
-                "HTTP 429: 요청 제한 가능성"
-            )
-        elif e.code in (401, 403):
-            result["message"] = (
-                f"HTTP {e.code}: 접근 제한 가능성"
-            )
-        else:
-            result["message"] = (
-                f"HTTP {e.code}"
-            )
-
-    except Exception as e:
-
-        result["message"] = str(e)
-
-    return result
 
 
 # ============================================================
@@ -473,22 +251,33 @@ def check_youtube_http():
 def get_base_options():
 
     options = {
+
         "quiet": True,
         "no_warnings": True,
+
         "noplaylist": True,
+
         "no_mtime": True,
         "no_overwrites": True,
 
         "retries": 3,
         "fragment_retries": 3,
+
         "socket_timeout": 30,
 
         "extractor_args": {
+
+            "youtube": {
+                "player_client": [
+                    "mweb"
+                ]
+            },
+
             "youtubepot-bgutilhttp": {
                 "base_url": (
                     f"http://127.0.0.1:{BGUTIL_PORT}"
                 )
-            }
+            },
         },
     }
 
@@ -501,233 +290,71 @@ def get_base_options():
 
 
 # ============================================================
-# 오류 분류
-# ============================================================
-
-def classify_error(error_text: str):
-
-    text = (
-        error_text or ""
-    ).lower()
-
-    if (
-        "429" in text
-        or "too many requests" in text
-    ):
-        return {
-            "code": "YOUTUBE_429",
-            "title": "YouTube 요청 제한",
-            "message": (
-                "Render 서버에서 YouTube 요청이 제한되고 있을 가능성이 있습니다."
-            )
-        }
-
-    if (
-        "sign in to confirm" in text
-        or "not a bot" in text
-        or "confirm you’re not a bot" in text
-        or "confirm you're not a bot" in text
-    ):
-        return {
-            "code": "YOUTUBE_BOT_CHECK",
-            "title": "YouTube 봇 확인",
-            "message": (
-                "YouTube가 현재 서버 요청을 인증/봇 확인 대상으로 보고 있습니다."
-            )
-        }
-
-    if (
-        "failed to extract any player response"
-        in text
-    ):
-        return {
-            "code": "PLAYER_RESPONSE",
-            "title": "Player Response 추출 실패",
-            "message": (
-                "YouTube player response를 가져오지 못했습니다."
-            )
-        }
-
-    if (
-        "video unavailable" in text
-        or "this video is unavailable" in text
-    ):
-        return {
-            "code": "VIDEO_UNAVAILABLE",
-            "title": "영상 접근 불가",
-            "message": (
-                "해당 영상의 접근 상태를 확인해야 합니다."
-            )
-        }
-
-    if (
-        "403" in text
-        or "forbidden" in text
-    ):
-        return {
-            "code": "HTTP_403",
-            "title": "접근 거부",
-            "message": (
-                "YouTube가 요청을 거부했습니다."
-            )
-        }
-
-    if (
-        "ffmpeg" in text
-        and (
-            "not found" in text
-            or "not installed" in text
-        )
-    ):
-        return {
-            "code": "FFMPEG",
-            "title": "FFmpeg 문제",
-            "message": (
-                "FFmpeg 설치 또는 실행 상태를 확인해야 합니다."
-            )
-        }
-
-    if (
-        "requested format" in text
-        or "format is not available" in text
-        or "no video formats" in text
-    ):
-        return {
-            "code": "FORMAT",
-            "title": "다운로드 포맷 문제",
-            "message": (
-                "현재 영상에서 요청한 포맷을 찾지 못했습니다."
-            )
-        }
-
-    return {
-        "code": "UNKNOWN",
-        "title": "원인 미확인",
-        "message": (
-            "상세 진단 로그를 확인해야 합니다."
-        )
-    }
-
-
-# ============================================================
-# Client 테스트
-# ============================================================
-
-YOUTUBE_CLIENTS = [
-    "mweb",
-    "web_safari",
-    "web_embedded",
-    "android_vr",
-    "tv",
-]
-
-
-def run_client_test(
-    url: str,
-    client: str
-):
-
-    result = {
-        "client": client,
-        "ok": False,
-        "title": None,
-        "video_id": None,
-        "format_count": 0,
-        "error": None,
-        "classification": None,
-    }
-
-    try:
-
-        options = get_base_options()
-
-        options.update({
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "socket_timeout": 30,
-
-            "extractor_args": {
-                "youtube": {
-                    "player_client": [client],
-                },
-
-                "youtubepot-bgutilhttp": {
-                    "base_url": (
-                        f"http://127.0.0.1:{BGUTIL_PORT}"
-                    )
-                },
-            },
-        })
-
-        with yt_dlp.YoutubeDL(
-            options
-        ) as ydl:
-
-            info = ydl.extract_info(
-                url,
-                download=False
-            )
-
-        result["ok"] = True
-        result["title"] = info.get("title")
-        result["video_id"] = info.get("id")
-        result["format_count"] = len(
-            info.get("formats") or []
-        )
-
-    except Exception as e:
-
-        error_text = str(e)
-
-        result["error"] = error_text[:2000]
-
-        result["classification"] = (
-            classify_error(error_text)
-        )
-
-    return result
-
-
-# ============================================================
 # Health
 # ============================================================
 
 @app.get("/api/health")
 def health():
 
-    bgutil = check_bgutil()
+    try:
+        yt_version = pkg_version(
+            "yt-dlp"
+        )
+    except Exception:
+        yt_version = "unknown"
+
+    cookie_enabled = bool(
+        os.environ.get(
+            "YOUTUBE_COOKIES",
+            ""
+        ).strip()
+    )
+
+    bgutil_ok = False
+
+    try:
+
+        sock = socket.create_connection(
+            (
+                "127.0.0.1",
+                BGUTIL_PORT
+            ),
+            timeout=2
+        )
+
+        sock.close()
+
+        bgutil_ok = True
+
+    except Exception:
+        pass
 
     return {
+
         "ok": True,
+
         "service": "youtube-downloader",
 
-        "yt_dlp": get_yt_dlp_version(),
+        "yt_dlp": yt_version,
 
-        "cookies": bool(
-            get_raw_cookie_value()
+        "cookies": cookie_enabled,
+
+        "user_agent": False,
+
+        "pot_provider": bgutil_ok,
+
+        "js_runtime": (
+            "deno"
+            if command_exists("deno")
+            else "not_found"
         ),
-
-        "cookie_structure": (
-            inspect_cookie_configuration()
-        ),
-
-        "ffmpeg": (
-            check_ffmpeg()
-        ),
-
-        "pot_provider": bgutil["ok"],
-
-        "bgutil": bgutil,
-
-        "js_runtime": "deno",
 
         "player_client": "mweb",
     }
 
 
 # ============================================================
-# 간단 테스트
+# Test endpoint
 # ============================================================
 
 @app.get("/api/test123")
@@ -735,17 +362,20 @@ def test123():
 
     return {
         "ok": True,
-        "message": "NEW_DIAGNOSTIC_SERVER_IS_RUNNING",
+        "message": "NEW_SERVER_PY_IS_RUNNING"
     }
 
 
 # ============================================================
-# 영상 정보
+# Video information
 # ============================================================
 
 @app.get("/api/info")
 def info(
-    url: str = Query(..., min_length=10)
+    url: str = Query(
+        ...,
+        min_length=10
+    )
 ):
 
     validate_url(url)
@@ -777,28 +407,38 @@ def info(
         )
 
     return {
+
         "title": data.get("title"),
+
         "duration": data.get("duration"),
+
         "uploader": data.get("uploader"),
+
         "thumbnail": data.get("thumbnail"),
+
         "id": data.get("id"),
-        "format_count": len(
-            data.get("formats") or []
-        ),
     }
 
 
 # ============================================================
-# 실제 다운로드
+# 다운로드
+#
+# MP3 / M4A / MP4 모두 유지
 # ============================================================
 
 @app.get("/api/download")
 def download(
-    url: str = Query(..., min_length=10),
+
+    url: str = Query(
+        ...,
+        min_length=10
+    ),
+
     format: str = Query(
         "mp3",
-        pattern="^(mp3|mp4)$"
+        pattern="^(mp3|m4a|mp4)$"
     ),
+
     quality: str = Query(
         "192 kbps"
     ),
@@ -814,7 +454,7 @@ def download(
 
         outtmpl = os.path.join(
             tmpdir,
-            "%(title).150B [%(id)s].%(ext)s"
+            "%(title)s [%(id)s].%(ext)s"
         )
 
         base = get_base_options()
@@ -843,20 +483,63 @@ def download(
             ydl_opts = {
                 **base,
 
-                "format": (
-                    "bestaudio/best"
-                ),
+                "format":
+                    "bestaudio/best",
 
                 "postprocessors": [
                     {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": bitrate,
+                        "key":
+                            "FFmpegExtractAudio",
+
+                        "preferredcodec":
+                            "mp3",
+
+                        "preferredquality":
+                            bitrate,
                     }
                 ],
             }
 
             media_type = "audio/mpeg"
+
+        # ====================================================
+        # M4A
+        # ====================================================
+
+        elif format == "m4a":
+
+            bitrate_match = re.search(
+                r"(\d+)",
+                quality
+            )
+
+            bitrate = (
+                bitrate_match.group(1)
+                if bitrate_match
+                else "192"
+            )
+
+            ydl_opts = {
+                **base,
+
+                "format":
+                    "bestaudio[ext=m4a]/bestaudio",
+
+                "postprocessors": [
+                    {
+                        "key":
+                            "FFmpegExtractAudio",
+
+                        "preferredcodec":
+                            "m4a",
+
+                        "preferredquality":
+                            bitrate,
+                    }
+                ],
+            }
+
+            media_type = "audio/mp4"
 
         # ====================================================
         # MP4
@@ -871,19 +554,25 @@ def download(
 
             if height_match:
 
-                height = height_match.group(1)
+                height = (
+                    height_match.group(1)
+                )
 
                 format_spec = (
-                    f"bestvideo[height<={height}]"
-                    f"[vcodec^=avc1]+"
-                    f"bestaudio[ext=m4a]/"
 
-                    f"best[height<={height}]"
+                    f"bestvideo"
+                    f"[height<={height}]"
+                    f"[vcodec^=avc1]"
+                    f"+bestaudio[ext=m4a]/"
+
+                    f"best"
+                    f"[height<={height}]"
                     f"[vcodec^=avc1]/"
 
-                    f"bestvideo[height<={height}]"
-                    f"[ext=mp4]+"
-                    f"bestaudio[ext=m4a]/"
+                    f"bestvideo"
+                    f"[height<={height}]"
+                    f"[ext=mp4]"
+                    f"+bestaudio[ext=m4a]/"
 
                     f"best"
                 )
@@ -891,26 +580,34 @@ def download(
             else:
 
                 format_spec = (
-                    "bestvideo[vcodec^=avc1]+"
-                    "bestaudio[ext=m4a]/"
-                    "best[vcodec^=avc1]/"
-                    "bestvideo[ext=mp4]+"
-                    "bestaudio[ext=m4a]/"
+
+                    "bestvideo"
+                    "[vcodec^=avc1]"
+                    "+bestaudio[ext=m4a]/"
+
+                    "best"
+                    "[vcodec^=avc1]/"
+
+                    "bestvideo[ext=mp4]"
+                    "+bestaudio[ext=m4a]/"
+
                     "best"
                 )
 
             ydl_opts = {
                 **base,
 
-                "format": format_spec,
+                "format":
+                    format_spec,
 
-                "merge_output_format": "mp4",
+                "merge_output_format":
+                    "mp4",
             }
 
             media_type = "video/mp4"
 
         # ====================================================
-        # 다운로드
+        # yt-dlp 실행
         # ====================================================
 
         with yt_dlp.YoutubeDL(
@@ -927,8 +624,12 @@ def download(
         # ====================================================
 
         files = [
+
             f
-            for f in Path(tmpdir).iterdir()
+            for f in Path(
+                tmpdir
+            ).iterdir()
+
             if f.is_file()
         ]
 
@@ -936,12 +637,15 @@ def download(
 
             raise HTTPException(
                 status_code=500,
-                detail="다운로드된 파일이 없습니다."
+                detail=(
+                    "다운로드된 파일이 없습니다."
+                )
             )
 
         filepath = max(
             files,
-            key=lambda f: f.stat().st_size
+            key=lambda f:
+                f.stat().st_size
         )
 
         filename = safe_filename(
@@ -949,8 +653,11 @@ def download(
         )
 
         return FileResponse(
+
             path=str(filepath),
+
             media_type=media_type,
+
             filename=filename,
 
             background=BackgroundTask(
@@ -985,61 +692,360 @@ def download(
 
 
 # ============================================================
-# 기존 /api/diag
+# BgUtils 기본 진단
 # ============================================================
 
 @app.get("/api/diag")
 def diag():
 
-    bgutil = check_bgutil()
+    result = {}
 
-    youtube = check_youtube_http()
+    # yt-dlp
+    try:
+        result["yt_dlp_pkg"] = pkg_version(
+            "yt-dlp"
+        )
+    except Exception as e:
+        result["yt_dlp_pkg"] = (
+            f"error: {e}"
+        )
 
-    ffmpeg = check_ffmpeg()
+    # Cookie
+    result["cookies_configured"] = bool(
+        os.environ.get(
+            "YOUTUBE_COOKIES",
+            ""
+        ).strip()
+    )
 
-    cookies = inspect_cookie_configuration()
+    result["cookie_structure"] = (
+        inspect_cookie_configuration()
+    )
 
-    return {
-        "yt_dlp_pkg": get_yt_dlp_version(),
-
-        "cookies_configured": (
-            cookies["configured"]
-        ),
-
-        "cookie_structure": cookies,
-
-        "youtube_http": youtube,
-
-        "bgutil_tcp": bgutil["tcp"],
-
-        "bgutil_ping": (
-            bgutil["ping_response"]
-        ),
-
-        "bgutil_ok": bgutil["ok"],
-
-        "ffmpeg": ffmpeg,
-
-        "message": (
-            "diagnostic endpoint"
-        ),
+    # Deno
+    result["deno"] = {
+        "available":
+            command_exists("deno"),
+        "version":
+            get_command_version("deno"),
     }
+
+    # FFmpeg
+    result["ffmpeg"] = {
+        "available":
+            command_exists("ffmpeg"),
+        "version":
+            get_command_version("ffmpeg"),
+    }
+
+    # BgUtils TCP
+    try:
+
+        sock = socket.create_connection(
+            (
+                "127.0.0.1",
+                BGUTIL_PORT
+            ),
+            timeout=3
+        )
+
+        sock.close()
+
+        result["bgutil_tcp"] = True
+
+    except Exception as e:
+
+        result["bgutil_tcp"] = (
+            f"error: {e}"
+        )
+
+    # BgUtils ping
+    try:
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{BGUTIL_PORT}/ping",
+            timeout=5
+        ) as r:
+
+            result["bgutil_ping"] = (
+                r.read()
+                .decode(
+                    errors="ignore"
+                )[:500]
+            )
+
+    except Exception as e:
+
+        result["bgutil_ping"] = (
+            f"error: {e}"
+        )
+
+    return result
 
 
 # ============================================================
-# Client 5종 테스트
+# YouTube HTTP 상태 검사
+# ============================================================
+
+def check_youtube_http(url: str):
+
+    req = urllib.request.Request(
+
+        url,
+
+        headers={
+            "User-Agent":
+                (
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) "
+                    "Chrome/138.0.0.0 Safari/537.36"
+                )
+        }
+    )
+
+    try:
+
+        with urllib.request.urlopen(
+            req,
+            timeout=20
+        ) as response:
+
+            return {
+                "ok": True,
+                "status":
+                    response.status,
+                "final_url":
+                    response.geturl(),
+            }
+
+    except urllib.error.HTTPError as e:
+
+        return {
+            "ok": False,
+            "status":
+                e.code,
+            "reason":
+                str(e.reason),
+        }
+
+    except Exception as e:
+
+        return {
+            "ok": False,
+            "status": None,
+            "error": str(e),
+        }
+
+
+# ============================================================
+# 오류 분류
+# ============================================================
+
+def classify_error(text: str):
+
+    value = (
+        text or ""
+    ).lower()
+
+    if (
+        "429" in value
+        or "too many requests" in value
+    ):
+        return (
+            "YOUTUBE_429",
+            "YouTube가 현재 서버 요청을 429로 제한했습니다."
+        )
+
+    if (
+        "sign in to confirm"
+        in value
+        or "not a bot"
+        in value
+        or "bot" in value
+    ):
+        return (
+            "YOUTUBE_BOT_CHECK",
+            "YouTube가 서버 요청에 봇 확인을 요구했습니다."
+        )
+
+    if (
+        "failed to extract any player response"
+        in value
+        or "player response"
+        in value
+    ):
+        return (
+            "PLAYER_RESPONSE",
+            "YouTube Player Response를 가져오지 못했습니다."
+        )
+
+    if (
+        "403" in value
+        or "forbidden" in value
+    ):
+        return (
+            "HTTP_403",
+            "YouTube가 스트림 요청을 403으로 거부했습니다."
+        )
+
+    if (
+        "ffmpeg" in value
+        or "postprocessing" in value
+    ):
+        return (
+            "FFMPEG",
+            "FFmpeg 또는 후처리 단계에서 문제가 발생했습니다."
+        )
+
+    if (
+        "requested format"
+        in value
+        or "format is not available"
+        in value
+    ):
+        return (
+            "FORMAT",
+            "요청한 다운로드 형식을 사용할 수 없습니다."
+        )
+
+    if (
+        "video unavailable"
+        in value
+        or "private video"
+        in value
+        or "members-only"
+        in value
+    ):
+        return (
+            "VIDEO_UNAVAILABLE",
+            "영상 자체가 현재 서버에서 접근할 수 없는 상태입니다."
+        )
+
+    return (
+        "UNKNOWN",
+        "정확한 원인을 자동 분류하지 못했습니다."
+    )
+
+
+# ============================================================
+# Client 하나 테스트
+# ============================================================
+
+def run_client_test(
+    url: str,
+    client: str
+):
+
+    result = {
+
+        "client": client,
+
+        "success": False,
+
+        "title": None,
+
+        "video_id": None,
+
+        "duration": None,
+
+        "format_count": 0,
+
+        "error": None,
+    }
+
+    try:
+
+        options = get_base_options()
+
+        options.update({
+
+            "quiet": True,
+
+            "no_warnings": True,
+
+            "skip_download": True,
+
+            "socket_timeout": 30,
+
+            "extractor_args": {
+
+                "youtube": {
+                    "player_client": [
+                        client
+                    ]
+                },
+
+                "youtubepot-bgutilhttp": {
+                    "base_url":
+                        (
+                            f"http://127.0.0.1:"
+                            f"{BGUTIL_PORT}"
+                        )
+                },
+            },
+        })
+
+        with yt_dlp.YoutubeDL(
+            options
+        ) as ydl:
+
+            info = ydl.extract_info(
+                url,
+                download=False
+            )
+
+        result["success"] = True
+
+        result["title"] = (
+            info.get("title")
+        )
+
+        result["video_id"] = (
+            info.get("id")
+        )
+
+        result["duration"] = (
+            info.get("duration")
+        )
+
+        result["format_count"] = len(
+            info.get("formats") or []
+        )
+
+    except Exception as e:
+
+        result["error"] = str(e)[:2000]
+
+    return result
+
+
+# ============================================================
+# Client 비교
 # ============================================================
 
 @app.get("/api/test-clients")
 def test_clients(
-    url: str = Query(..., min_length=10)
+    url: str = Query(
+        ...,
+        min_length=10
+    )
 ):
 
     validate_url(url)
 
+    clients = [
+        "mweb",
+        "web_safari",
+        "web_embedded",
+        "android_vr",
+        "tv",
+    ]
+
     results = []
 
-    for client in YOUTUBE_CLIENTS:
+    for client in clients:
 
         results.append(
             run_client_test(
@@ -1049,22 +1055,34 @@ def test_clients(
         )
 
     return {
+
         "ok": True,
+
         "url": url,
-        "cookies": bool(
-            get_raw_cookie_value()
-        ),
-        "results": results,
+
+        "cookies":
+            bool(
+                os.environ.get(
+                    "YOUTUBE_COOKIES",
+                    ""
+                ).strip()
+            ),
+
+        "results":
+            results,
     }
 
 
 # ============================================================
-# 상세 YouTube Debug
+# YouTube 상세 디버그
 # ============================================================
 
 @app.get("/api/test-youtube-debug")
 def test_youtube_debug(
-    url: str = Query(..., min_length=10)
+    url: str = Query(
+        ...,
+        min_length=10
+    )
 ):
 
     validate_url(url)
@@ -1093,6 +1111,7 @@ def test_youtube_debug(
     options.update({
 
         "quiet": False,
+
         "no_warnings": False,
 
         "skip_download": True,
@@ -1116,9 +1135,11 @@ def test_youtube_debug(
 
             "youtubepot-bgutilhttp": {
 
-                "base_url": (
-                    f"http://127.0.0.1:{BGUTIL_PORT}"
-                )
+                "base_url":
+                    (
+                        f"http://127.0.0.1:"
+                        f"{BGUTIL_PORT}"
+                    )
             },
         },
     })
@@ -1135,86 +1156,220 @@ def test_youtube_debug(
             )
 
         return {
+
             "ok": True,
 
-            "cookies": bool(
-                get_raw_cookie_value()
-            ),
+            "cookies":
+                bool(
+                    os.environ.get(
+                        "YOUTUBE_COOKIES",
+                        ""
+                    ).strip()
+                ),
 
-            "title": info.get(
-                "title"
-            ),
+            "title":
+                info.get("title"),
 
-            "video_id": info.get(
-                "id"
-            ),
+            "video_id":
+                info.get("id"),
 
-            "duration": info.get(
-                "duration"
-            ),
+            "duration":
+                info.get("duration"),
 
-            "format_count": len(
-                info.get("formats") or []
-            ),
+            "format_count":
+                len(
+                    info.get("formats") or []
+                ),
 
-            "logs": logs[-200:],
+            "logs":
+                logs[-150:],
         }
 
     except Exception as e:
 
-        error_text = str(e)
-
         return {
+
             "ok": False,
 
-            "cookies": bool(
-                get_raw_cookie_value()
-            ),
+            "cookies":
+                bool(
+                    os.environ.get(
+                        "YOUTUBE_COOKIES",
+                        ""
+                    ).strip()
+                ),
 
-            "error": error_text,
+            "error":
+                str(e),
 
-            "classification": (
-                classify_error(error_text)
-            ),
-
-            "logs": logs[-200:],
+            "logs":
+                logs[-150:],
         }
 
 
 # ============================================================
-# ★ 통합 진단
+# ★ 신규 통합 진단
+#
+# /api/diagnose?url=...
 # ============================================================
 
 @app.get("/api/diagnose")
 def diagnose(
-    url: str = Query(..., min_length=10)
+    url: str = Query(
+        ...,
+        min_length=10
+    )
 ):
 
     validate_url(url)
 
+    report = {
+
+        "ok": True,
+
+        "url": url,
+
+        "environment": {},
+
+        "youtube_http": {},
+
+        "player_response": {},
+
+        "clients": [],
+
+        "diagnosis": {},
+    }
+
     # --------------------------------------------------------
-    # 기본 환경
+    # 1. yt-dlp
     # --------------------------------------------------------
 
-    cookies = inspect_cookie_configuration()
+    try:
 
-    bgutil = check_bgutil()
+        report["environment"]["yt_dlp"] = (
+            pkg_version("yt-dlp")
+        )
 
-    ffmpeg = check_ffmpeg()
+    except Exception as e:
 
-    youtube_http = check_youtube_http()
+        report["environment"]["yt_dlp"] = (
+            f"error: {e}"
+        )
 
     # --------------------------------------------------------
-    # 기본 URL 분석
+    # 2. Deno
+    # --------------------------------------------------------
+
+    report["environment"]["deno"] = {
+
+        "available":
+            command_exists("deno"),
+
+        "version":
+            get_command_version("deno"),
+    }
+
+    # --------------------------------------------------------
+    # 3. FFmpeg
+    # --------------------------------------------------------
+
+    report["environment"]["ffmpeg"] = {
+
+        "available":
+            command_exists("ffmpeg"),
+
+        "version":
+            get_command_version("ffmpeg"),
+    }
+
+    # --------------------------------------------------------
+    # 4. Cookie
+    # --------------------------------------------------------
+
+    report["environment"]["cookies"] = (
+        inspect_cookie_configuration()
+    )
+
+    # --------------------------------------------------------
+    # 5. BgUtils
+    # --------------------------------------------------------
+
+    bgutil = {
+
+        "tcp": False,
+
+        "ping": None,
+
+        "error": None,
+    }
+
+    try:
+
+        sock = socket.create_connection(
+            (
+                "127.0.0.1",
+                BGUTIL_PORT
+            ),
+            timeout=3
+        )
+
+        sock.close()
+
+        bgutil["tcp"] = True
+
+    except Exception as e:
+
+        bgutil["error"] = str(e)
+
+    try:
+
+        with urllib.request.urlopen(
+            (
+                f"http://127.0.0.1:"
+                f"{BGUTIL_PORT}/ping"
+            ),
+            timeout=5
+        ) as response:
+
+            bgutil["ping"] = (
+                response.read()
+                .decode(
+                    errors="ignore"
+                )[:500]
+            )
+
+    except Exception as e:
+
+        if not bgutil["error"]:
+            bgutil["error"] = str(e)
+
+    report["environment"]["bgutil"] = bgutil
+
+    # --------------------------------------------------------
+    # 6. YouTube HTTP
+    # --------------------------------------------------------
+
+    report["youtube_http"] = (
+        check_youtube_http(url)
+    )
+
+    # --------------------------------------------------------
+    # 7. Primary Player Response
     # --------------------------------------------------------
 
     primary = {
-        "ok": False,
+
+        "success": False,
+
         "title": None,
+
         "video_id": None,
+
+        "duration": None,
+
         "format_count": 0,
+
         "error": None,
-        "classification": None,
     }
 
     try:
@@ -1235,39 +1390,50 @@ def diagnose(
                 download=False
             )
 
-        primary["ok"] = True
-        primary["title"] = info.get("title")
-        primary["video_id"] = info.get("id")
+        primary["success"] = True
+
+        primary["title"] = (
+            info.get("title")
+        )
+
+        primary["video_id"] = (
+            info.get("id")
+        )
+
+        primary["duration"] = (
+            info.get("duration")
+        )
+
         primary["format_count"] = len(
             info.get("formats") or []
         )
 
     except Exception as e:
 
-        error_text = str(e)
+        primary["error"] = str(e)[:3000]
 
-        primary["error"] = (
-            error_text[:3000]
-        )
-
-        primary["classification"] = (
-            classify_error(error_text)
-        )
+    report["player_response"] = primary
 
     # --------------------------------------------------------
-    # Player client 테스트
+    # 8. Client 비교
+    #
+    # Primary 성공이면 전체 client 테스트를 생략.
+    # 실패할 때만 원인 파악을 위해 테스트.
     # --------------------------------------------------------
 
-    clients = []
+    if not primary["success"]:
 
-    # 기본 추출 성공이면 굳이 5개를 모두 돌리지 않는다.
-    # 실패했을 때만 상세 비교를 한다.
+        clients = [
+            "mweb",
+            "web_safari",
+            "web_embedded",
+            "android_vr",
+            "tv",
+        ]
 
-    if not primary["ok"]:
+        for client in clients:
 
-        for client in YOUTUBE_CLIENTS:
-
-            clients.append(
+            report["clients"].append(
                 run_client_test(
                     url,
                     client
@@ -1275,137 +1441,141 @@ def diagnose(
             )
 
     # --------------------------------------------------------
-    # 최종 판단
+    # 9. 최종 원인 분류
     # --------------------------------------------------------
 
-    diagnosis = {
-        "code": "OK",
-        "title": "정상",
-        "message": "YouTube 영상 분석이 성공했습니다.",
-    }
+    primary_error = (
+        primary.get("error")
+        or ""
+    )
 
-    if not cookies["configured"]:
+    http_status = (
+        report["youtube_http"].get(
+            "status"
+        )
+    )
 
-        diagnosis = {
-            "code": "COOKIE_NOT_CONFIGURED",
-            "title": "쿠키 미설정",
-            "message": (
-                "YOUTUBE_COOKIES가 설정되어 있지 않습니다."
-            ),
-        }
+    combined_error = (
+        primary_error
+        + "\n"
+        + json.dumps(
+            report["clients"],
+            ensure_ascii=False
+        )
+    )
 
-    if (
-        cookies["configured"]
-        and not cookies["valid_structure"]
-    ):
+    code, message = classify_error(
+        combined_error
+    )
 
-        diagnosis = {
-            "code": "COOKIE_FORMAT",
-            "title": "쿠키 형식 문제",
-            "message": (
-                "YOUTUBE_COOKIES의 Netscape 형식을 확인하세요."
-            ),
-        }
+    # HTTP 429가 직접 확인된 경우 우선
+    if http_status == 429:
 
-    if (
-        youtube_http["status"] == 429
-    ):
+        code = "YOUTUBE_429"
 
-        diagnosis = {
-            "code": "YOUTUBE_429",
-            "title": "YouTube 요청 제한",
-            "message": (
-                "YouTube가 Render 서버의 요청을 제한하고 있습니다."
-            ),
-        }
-
-    if not bgutil["ok"]:
-
-        diagnosis = {
-            "code": "BGUTIL",
-            "title": "PO Token 서버 문제",
-            "message": (
-                "BgUtils 연결 또는 /ping 응답을 확인해야 합니다."
-            ),
-        }
-
-    if not ffmpeg["ok"]:
-
-        diagnosis = {
-            "code": "FFMPEG",
-            "title": "FFmpeg 문제",
-            "message": (
-                "FFmpeg가 설치되어 있지 않거나 PATH에서 찾을 수 없습니다."
-            ),
-        }
-
-    if not primary["ok"]:
-
-        classification = (
-            primary.get("classification")
-            or {}
+        message = (
+            "Render 서버에서 YouTube 접근 시 "
+            "HTTP 429가 확인되었습니다."
         )
 
-        code = classification.get(
-            "code"
+    # Player Response
+    elif (
+        not primary["success"]
+        and (
+            code == "UNKNOWN"
+            or code == "PLAYER_RESPONSE"
+        )
+    ):
+
+        code = "PLAYER_RESPONSE"
+
+        message = (
+            "yt-dlp가 YouTube Player Response를 "
+            "가져오지 못했습니다."
         )
 
-        if code == "YOUTUBE_429":
+    report["diagnosis"] = {
 
-            diagnosis = classification
+        "code":
+            code,
 
-        elif code == "YOUTUBE_BOT_CHECK":
+        "message":
+            message,
 
-            diagnosis = classification
+        "primary_error":
+            primary_error[:3000],
 
-        elif code == "PLAYER_RESPONSE":
-
-            diagnosis = classification
-
-        elif code == "HTTP_403":
-
-            diagnosis = classification
-
-        elif code == "VIDEO_UNAVAILABLE":
-
-            diagnosis = classification
-
-        else:
-
-            diagnosis = {
-                "code": "PLAYER_RESPONSE",
-                "title": "YouTube 분석 실패",
-                "message": (
-                    "Player response 또는 YouTube 요청 상태를 확인하세요."
-                ),
-            }
-
-    return {
-
-        "ok": True,
-
-        "url": url,
-
-        "environment": {
-
-            "yt_dlp": (
-                get_yt_dlp_version()
+        "recommendation":
+            diagnosis_recommendation(
+                code,
+                report
             ),
-
-            "cookies": cookies,
-
-            "youtube_http": youtube_http,
-
-            "bgutil": bgutil,
-
-            "ffmpeg": ffmpeg,
-
-        },
-
-        "primary": primary,
-
-        "clients": clients,
-
-        "diagnosis": diagnosis,
-
     }
+
+    return report
+
+
+# ============================================================
+# 진단 권고
+# ============================================================
+
+def diagnosis_recommendation(
+    code: str,
+    report: dict
+):
+
+    if code == "YOUTUBE_429":
+
+        return (
+            "YouTube HTTP 429가 확인되었습니다. "
+            "yt-dlp/PO Token 설정을 확인하고 "
+            "동일 서버에서 반복 요청을 줄인 뒤 "
+            "재시험하세요."
+        )
+
+    if code == "YOUTUBE_BOT_CHECK":
+
+        return (
+            "YouTube가 서버 요청을 봇으로 판단하고 "
+            "추가 확인을 요구하고 있습니다. "
+            "Cookie와 PO Token 상태를 함께 확인하세요."
+        )
+
+    if code == "PLAYER_RESPONSE":
+
+        return (
+            "Player Response 추출 단계에서 실패했습니다. "
+            "yt-dlp 버전, JS runtime, PO Token provider, "
+            "Cookie 및 YouTube HTTP 상태를 순서대로 확인하세요."
+        )
+
+    if code == "HTTP_403":
+
+        return (
+            "YouTube가 스트림 요청을 403으로 거부했습니다. "
+            "PO Token과 client별 결과를 확인하세요."
+        )
+
+    if code == "FFMPEG":
+
+        return (
+            "YouTube 추출 이후 FFmpeg 후처리 단계에서 "
+            "문제가 발생했을 가능성이 있습니다."
+        )
+
+    if code == "FORMAT":
+
+        return (
+            "요청한 화질/형식을 현재 영상에서 "
+            "사용할 수 없는 상태입니다."
+        )
+
+    if code == "VIDEO_UNAVAILABLE":
+
+        return (
+            "영상의 공개 상태 또는 접근 권한을 확인하세요."
+        )
+
+    return (
+        "상세 로그와 client별 결과를 확인하세요."
+    )
