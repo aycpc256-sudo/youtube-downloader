@@ -3,14 +3,10 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-
 html,
 body {
-
   margin: 0;
-
   background: #111;
-
   color: #eee;
 
   font-family:
@@ -22,341 +18,203 @@ body {
     sans-serif;
 }
 
-
 .app {
-
   max-width: 520px;
-
   margin: 0 auto;
-
-  padding:
-    20px
-    16px
-    40px;
-
+  padding: 20px 16px 40px;
   min-height: 100vh;
 }
-
 
 .header {
   margin-bottom: 18px;
 }
 
-
 .header h1 {
-
   font-size: 1.3rem;
-
-  margin:
-    0
-    0
-    4px;
+  margin: 0 0 4px;
 }
 
-
 .subtitle {
-
   font-size: 0.85rem;
-
   color: #888;
-
   margin: 0;
 }
 
-
-/* ============================================================
-   Card
-   ============================================================ */
-
 .card {
-
   background: #1a1a1a;
-
-  border:
-    1px solid
-    #2a2a2a;
-
+  border: 1px solid #2a2a2a;
   border-radius: 12px;
-
   padding: 14px;
-
   margin-bottom: 12px;
 }
 
-
 .label {
-
   display: block;
-
   font-size: 0.85rem;
-
   color: #aaa;
-
   margin-bottom: 8px;
 }
 
+.quality-label {
+  margin-top: 14px;
+}
 
 input[type="url"] {
-
   width: 100%;
-
-  padding:
-    12px
-    14px;
+  padding: 12px 14px;
 
   font-size: 1rem;
 
   border-radius: 8px;
-
-  border:
-    1px solid
-    #333;
+  border: 1px solid #333;
 
   background: #0d0d0d;
-
   color: #eee;
 
   outline: none;
 }
 
-
 input[type="url"]:focus {
-
-  border-color:
-    #e53935;
+  border-color: #e53935;
 }
 
-
-/* ============================================================
-   Row
-   ============================================================ */
-
 .row {
-
   display: flex;
-
   gap: 8px;
-
   align-items: center;
-
   flex-wrap: wrap;
 }
 
-
 .row.between {
-
-  justify-content:
-    space-between;
+  justify-content: space-between;
 }
 
 
-/* ============================================================
-   Format chips
-   ============================================================ */
-
-.format-row {
-
-  width: 100%;
-}
-
+/* 형식 버튼 */
 
 .chip {
-
   flex: 1;
 
-  padding:
-    10px
-    12px;
+  padding: 10px 8px;
 
   font-size: 0.95rem;
 
   border-radius: 8px;
+  border: 1px solid #333;
 
-  border:
-    1px solid
-    #333;
-
-  background:
-    #0d0d0d;
-
+  background: #0d0d0d;
   color: #ccc;
 
   cursor: pointer;
 }
 
-
 .chip.active {
-
-  background:
-    #e53935;
-
+  background: #e53935;
   color: white;
-
-  border-color:
-    #e53935;
+  border-color: #e53935;
 }
 
 
-/* ============================================================
-   Select
-   ============================================================ */
-
-.quality-label {
-
-  margin-top: 14px;
-}
-
+/* 품질 */
 
 select {
-
   width: 100%;
 
-  padding:
-    10px
-    12px;
+  padding: 10px 12px;
 
   font-size: 0.95rem;
 
   border-radius: 8px;
+  border: 1px solid #333;
 
-  border:
-    1px solid
-    #333;
-
-  background:
-    #0d0d0d;
-
+  background: #0d0d0d;
   color: #eee;
 
   outline: none;
 }
 
-
-/* ============================================================
-   Check
-   ============================================================ */
-
-.check {
-
-  display: flex;
-
-  align-items: center;
-
-  gap: 8px;
-
-  font-size: 0.9rem;
-
-  color: #ccc;
-
-  cursor: pointer;
-}
-
-
-.check input {
-
-  width: 18px;
-
-  height: 18px;
-
-  accent-color:
-    #e53935;
-}
-
-
 .hint {
-
   font-size: 0.78rem;
-
   color: #666;
-
   font-weight: normal;
 }
 
 
-/* ============================================================
-   Folder
-   ============================================================ */
+/* 폴더 */
 
 .folder-row {
-
   display: flex;
-
   gap: 8px;
-
   align-items: center;
-
   margin-top: 8px;
 }
 
-
 .folder-name {
-
   flex: 1;
 
   font-size: 0.9rem;
-
   color: #aaa;
 
   overflow: hidden;
-
   text-overflow: ellipsis;
-
   white-space: nowrap;
 }
 
-
 .ghost {
-
-  padding:
-    6px
-    10px;
+  padding: 6px 10px;
 
   font-size: 0.85rem;
 
   border-radius: 6px;
+  border: 1px solid #444;
 
-  border:
-    1px solid
-    #444;
-
-  background:
-    transparent;
-
+  background: transparent;
   color: #ccc;
 
   cursor: pointer;
 }
 
-
 .ghost:disabled {
-
-  opacity: 0.45;
-
-  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 
-/* ============================================================
-   Buttons
-   ============================================================ */
+/* 체크박스 */
+
+.check {
+  display: flex;
+  align-items: center;
+
+  gap: 8px;
+
+  font-size: 0.9rem;
+  color: #ccc;
+
+  cursor: pointer;
+}
+
+.check input {
+  width: 18px;
+  height: 18px;
+
+  accent-color: #e53935;
+}
+
+
+/* 다운로드 */
 
 .primary {
-
   width: 100%;
 
   padding: 14px;
 
   font-size: 1.05rem;
-
   font-weight: bold;
 
   border: none;
-
   border-radius: 10px;
 
-  background:
-    #e53935;
-
+  background: #e53935;
   color: white;
 
   cursor: pointer;
@@ -364,17 +222,12 @@ select {
   margin-top: 4px;
 }
 
-
 .primary:disabled {
-
   opacity: 0.5;
-
   cursor: wait;
 }
 
-
 .secondary {
-
   width: 100%;
 
   padding: 10px;
@@ -382,14 +235,9 @@ select {
   font-size: 0.9rem;
 
   border-radius: 10px;
+  border: 1px solid #444;
 
-  border:
-    1px solid
-    #444;
-
-  background:
-    transparent;
-
+  background: transparent;
   color: #ccc;
 
   cursor: pointer;
@@ -397,64 +245,45 @@ select {
   margin-top: 8px;
 }
 
-
 .secondary:disabled {
-
   opacity: 0.4;
-
   cursor: not-allowed;
 }
 
 
-/* ============================================================
-   Progress
-   ============================================================ */
+/* 진행률 */
 
 .progress-wrap {
-
   margin-top: 16px;
 
   height: 6px;
 
-  background:
-    #222;
+  background: #222;
 
   border-radius: 3px;
 
   overflow: hidden;
 }
 
-
 .progress-bar {
-
   height: 100%;
 
   width: 0%;
 
-  background:
-    #e53935;
+  background: #e53935;
 
-  transition:
-    width
-    0.2s
-    ease;
+  transition: width 0.2s ease;
 }
 
 
-/* ============================================================
-   Status
-   ============================================================ */
+/* 상태 */
 
 .status {
-
   font-size: 0.85rem;
 
   color: #888;
 
-  margin:
-    10px
-    0
-    0;
+  margin: 10px 0 0;
 
   min-height: 1.2em;
 
@@ -462,353 +291,116 @@ select {
 }
 
 
-/* ============================================================
-   진단
-   ============================================================ */
+/* 진단 */
 
 .diagnostic-card {
-
-  margin-top: 18px;
-
-  border-color:
-    #303030;
+  margin-top: 12px;
 }
-
-
-.diagnostic-header {
-
-  display: flex;
-
-  justify-content:
-    space-between;
-
-  align-items: center;
-
-  gap: 12px;
-}
-
-
-.diagnostic-title {
-
-  font-size: 0.95rem;
-
-  font-weight: 700;
-
-  color: #eee;
-}
-
-
-.diagnostic-subtitle {
-
-  margin-top: 4px;
-
-  font-size: 0.75rem;
-
-  color: #777;
-
-  line-height: 1.4;
-}
-
-
-.diagnose-button {
-
-  flex:
-    0
-    0
-    auto;
-
-  padding:
-    8px
-    14px;
-
-  border-radius: 8px;
-
-  border:
-    1px solid
-    #444;
-
-  background:
-    #222;
-
-  color: #ddd;
-
-  cursor: pointer;
-}
-
-
-.diagnose-button:hover {
-
-  background:
-    #2a2a2a;
-}
-
-
-.diagnose-button:disabled {
-
-  opacity: 0.5;
-
-  cursor: wait;
-}
-
-
-.hidden {
-
-  display: none;
-}
-
-
-/* ============================================================
-   진단 요약
-   ============================================================ */
 
 .diagnostic-result {
-
-  margin-top: 14px;
-}
-
-
-.diagnostic-summary {
-
-  display: flex;
-
-  align-items: center;
-
-  justify-content:
-    space-between;
-
-  gap: 10px;
-
-  padding:
-    12px;
-
-  border-radius: 8px;
-
-  border:
-    1px solid
-    #383838;
-
-  background:
-    #151515;
+  margin-top: 12px;
 
   font-size: 0.82rem;
 
-  line-height: 1.4;
+  line-height: 1.55;
+
+  color: #aaa;
+
+  word-break: break-word;
 }
 
-
-.diagnostic-summary.success {
-
-  border-color:
-    #285f39;
-}
-
-
-.diagnostic-summary.warning {
-
-  border-color:
-    #765c24;
-}
-
-
-.diagnostic-summary.danger {
-
-  border-color:
-    #733030;
-}
-
-
-.diagnostic-code {
-
-  flex:
-    0
-    0
-    auto;
-
-  padding:
-    3px
-    6px;
-
-  border-radius: 4px;
-
-  background:
-    #242424;
-
-  color: #999;
-
-  font-size: 0.68rem;
-
-  font-family:
-    monospace;
-}
-
-
-.diagnostic-loading {
-
-  color:
-    #4a9eff;
-}
-
-
-.diagnostic-error {
-
-  color:
-    #e57373;
-}
-
-
-/* ============================================================
-   진단 항목
-   ============================================================ */
-
-.diagnostic-items {
-
-  margin-top: 10px;
-
-  border:
-    1px solid
-    #292929;
+.diag-summary {
+  padding: 10px;
 
   border-radius: 8px;
 
-  overflow: hidden;
+  background: #111;
+
+  border: 1px solid #2d2d2d;
+
+  margin-bottom: 8px;
 }
 
+.diag-title {
+  color: #eee;
 
-.diagnostic-item {
+  font-weight: 600;
 
+  margin-bottom: 6px;
+}
+
+.diag-good {
+  color: #4caf50;
+}
+
+.diag-warn {
+  color: #ff9800;
+}
+
+.diag-error {
+  color: #e53935;
+}
+
+.diag-row {
   display: flex;
 
-  justify-content:
-    space-between;
-
-  align-items: center;
+  justify-content: space-between;
 
   gap: 12px;
 
-  padding:
-    9px
-    10px;
+  padding: 4px 0;
 
-  border-bottom:
-    1px solid
-    #242424;
-
-  font-size: 0.78rem;
+  border-bottom: 1px solid #222;
 }
 
-
-.diagnostic-item:last-child {
-
-  border-bottom:
-    none;
+.diag-row:last-child {
+  border-bottom: 0;
 }
 
-
-.diagnostic-item-name {
-
-  color:
-    #aaa;
+.diag-label {
+  color: #888;
 }
 
+.diag-value {
+  color: #ddd;
 
-.diagnostic-ok {
-
-  color:
-    #70c88a;
-
-  text-align:
-    right;
-
-  word-break:
-    break-word;
+  text-align: right;
 }
 
-
-.diagnostic-fail {
-
-  color:
-    #e57373;
-
-  text-align:
-    right;
-
-  word-break:
-    break-word;
+.diag-details {
+  margin-top: 8px;
 }
 
-
-/* ============================================================
-   상세 로그
-   ============================================================ */
-
-.diagnostic-details {
-
-  margin-top: 10px;
-
-  border:
-    1px solid
-    #292929;
-
-  border-radius: 8px;
-
-  overflow: hidden;
-}
-
-
-.diagnostic-details summary {
-
-  padding:
-    10px
-    12px;
-
+.diag-details summary {
   cursor: pointer;
 
-  color:
-    #999;
-
-  font-size:
-    0.78rem;
+  color: #999;
 }
 
+.diag-pre {
+  margin-top: 8px;
 
-.diagnostic-details pre {
+  padding: 10px;
 
-  margin: 0;
-
-  padding:
-    12px;
-
-  max-height:
-    420px;
+  max-height: 280px;
 
   overflow: auto;
 
-  background:
-    #0b0b0b;
+  white-space: pre-wrap;
 
-  color:
-    #aaa;
+  background: #090909;
 
-  font-size:
-    0.68rem;
+  border-radius: 8px;
 
-  line-height:
-    1.5;
+  color: #888;
 
-  white-space:
-    pre-wrap;
-
-  word-break:
-    break-word;
+  font-size: 0.72rem;
 }
 
 
-/* ============================================================
-   Footer
-   ============================================================ */
+/* footer */
 
 .footer {
-
   margin-top: 28px;
 
   font-size: 0.75rem;
@@ -816,41 +408,4 @@ select {
   color: #555;
 
   line-height: 1.5;
-}
-
-
-/* ============================================================
-   Mobile
-   ============================================================ */
-
-@media (max-width: 420px) {
-
-  .diagnostic-summary {
-
-    align-items:
-      flex-start;
-
-    flex-direction:
-      column;
-  }
-
-
-  .diagnostic-item {
-
-    align-items:
-      flex-start;
-
-    flex-direction:
-      column;
-
-    gap: 4px;
-  }
-
-
-  .diagnostic-ok,
-  .diagnostic-fail {
-
-    text-align:
-      left;
-  }
 }
