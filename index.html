@@ -1,33 +1,75 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-  <meta name="theme-color" content="#111111" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-  <meta name="apple-mobile-web-app-title" content="Downloader" />
+  <meta charset="UTF-8">
 
-  <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="styles.css" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  >
 
-  <title>YouTube Downloader</title>
+  <meta
+    name="theme-color"
+    content="#111111"
+  >
+
+  <meta
+    name="apple-mobile-web-app-capable"
+    content="yes"
+  >
+
+  <meta
+    name="apple-mobile-web-app-title"
+    content="Downloader"
+  >
+
+  <link
+    rel="manifest"
+    href="manifest.json"
+  >
+
+  <link
+    rel="stylesheet"
+    href="styles.css"
+  >
+
+  <title>
+    개인용 Downloader
+  </title>
+
 </head>
+
 
 <body>
 
 <main class="app">
 
   <header class="header">
-    <h1>YouTube Downloader</h1>
-    <p class="subtitle" id="device-label">기기 감지 중...</p>
+
+    <h1>
+      개인용 Downloader
+    </h1>
+
+    <p
+      class="subtitle"
+      id="device-label"
+    >
+      기기 확인 중...
+    </p>
+
   </header>
 
+
   <!-- URL -->
+
   <section class="card">
 
-    <label for="url" class="label">
+    <label
+      class="label"
+      for="url"
+    >
       YouTube URL
     </label>
 
@@ -35,14 +77,15 @@
       id="url"
       type="url"
       inputmode="url"
-      placeholder="https://youtu.be/..."
       autocomplete="off"
-    />
+      placeholder="https://youtu.be/..."
+    >
 
   </section>
 
 
   <!-- 형식 -->
+
   <section class="card">
 
     <div class="label">
@@ -53,172 +96,145 @@
 
       <button
         class="chip active"
+        type="button"
         data-format="mp3"
-        type="button">
+      >
         MP3
       </button>
 
       <button
         class="chip"
+        type="button"
         data-format="m4a"
-        type="button">
+      >
         M4A
       </button>
 
       <button
         class="chip"
+        type="button"
         data-format="mp4"
-        type="button">
+      >
         MP4
       </button>
 
     </div>
 
 
-    <div class="label quality-label">
+    <div
+      class="label quality-label"
+    >
 
       품질
 
       <span
         id="quality-hint"
-        class="hint">
+        class="hint"
+      >
         MP3 음질
       </span>
 
     </div>
 
 
-    <select id="quality"></select>
+    <select
+      id="quality"
+    >
+    </select>
 
-  </section>
 
-
-  <!-- 저장 폴더 -->
-  <section class="card">
-
-    <div class="row between">
-
-      <div class="label" style="margin:0;">
-        저장 위치
-      </div>
-
-      <span
-        class="hint"
-        id="folder-hint">
-      </span>
-
+    <div
+      id="video-info"
+      class="video-info"
+    >
     </div>
-
-
-    <div class="folder-row">
-
-      <span
-        id="folder-name"
-        class="folder-name">
-        기본 다운로드 폴더
-      </span>
-
-      <button
-        id="pick-folder-btn"
-        class="ghost"
-        type="button">
-        폴더 열기
-      </button>
-
-    </div>
-
-  </section>
-
-
-  <!-- PC 저장 옵션 -->
-  <section class="card">
-
-    <label class="check">
-
-      <input
-        type="checkbox"
-        id="ask-folder" />
-
-      <span>
-        저장할 때 폴더 선택 (PC)
-      </span>
-
-    </label>
 
   </section>
 
 
   <!-- 다운로드 -->
-  <button
-    id="download-btn"
-    class="primary"
-    type="button">
-    다운로드
-  </button>
+
+  <section class="card">
+
+    <button
+      id="download-btn"
+      class="primary"
+      type="button"
+    >
+      다운로드
+    </button>
 
 
-  <button
-    id="cancel-btn"
-    class="secondary"
-    type="button"
-    disabled>
-    취소
-  </button>
+    <button
+      id="cancel-btn"
+      class="secondary"
+      type="button"
+      disabled
+    >
+      취소
+    </button>
 
-
-  <!-- 진행률 -->
-  <div class="progress-wrap">
 
     <div
-      class="progress-bar"
-      id="progress-bar">
+      class="progress-wrap"
+    >
+
+      <div
+        id="progress-bar"
+        class="progress-bar"
+      ></div>
+
     </div>
 
-  </div>
 
+    <p
+      id="status"
+      class="status"
+    ></p>
 
-  <!-- 상태 -->
-  <p
-    class="status"
-    id="status">
-    대기 중
-  </p>
+  </section>
 
 
   <!-- 진단 -->
-  <section
-    class="card diagnostic-card"
-    id="diagnostic-card"
-    hidden>
+
+  <section class="card">
 
     <div class="row between">
 
-      <div class="label" style="margin:0;">
-        YouTube 연결 진단
+      <div>
+
+        <div class="label">
+          서버 진단
+        </div>
+
+        <div class="hint">
+          YouTube client / Deno / FFmpeg / PO Token
+        </div>
+
       </div>
 
       <button
         id="diagnose-btn"
         class="ghost"
-        type="button">
+        type="button"
+      >
         진단
       </button>
 
     </div>
 
 
-    <div
-      id="diagnostic-result"
-      class="diagnostic-result">
-    </div>
+    <pre
+      id="diagnose-result"
+      class="diagnose-result"
+    ></pre>
 
   </section>
 
 
   <footer class="footer">
 
-    개인용 · 본인이 소유하거나
-    다운로드 권한이 있는 콘텐츠에만 사용하세요.
+    개인용 웹 Downloader
 
   </footer>
 
@@ -228,4 +244,5 @@
 <script src="app.js"></script>
 
 </body>
+
 </html>
