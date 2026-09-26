@@ -1,535 +1,291 @@
-const API_BASE =
-  "https://youtube-downloader-onww.onrender.com";
+"use strict";
+
+const API_BASE = "https://youtube-downloader-onww.onrender.com";
+
+// ============================================================
+// DOM
+// ============================================================
+
+const $ = (selector) => document.querySelector(selector);
+
+const urlInput = $("#url");
+const qualitySelect = $("#quality");
+const qualityHint = $("#quality-hint");
+const downloadButton = $("#download-btn");
+const cancelButton = $("#cancel-btn");
+const diagnoseButton = $("#diagnose-btn");
+const diagnoseResult = $("#diagnose-result");
+const progressBar = $("#progress-bar");
+const statusElement = $("#status");
+const deviceLabel = $("#device-label");
+const videoInfo = $("#video-info");
+const videoTitle = $("#video-title");
+const videoMeta = $("#video-meta");
+
+// ============================================================
+// State
+// ============================================================
 
 let currentFormat = "mp3";
-let currentAbort = null;
-let currentPlayerClient = null;
+let currentAbortController = null;
 let currentVideoInfo = null;
 
-const urlInput =
-  document.getElementById("url");
+// ============================================================
+// Device
+// ============================================================
 
-const qualitySelect =
-  document.getElementById("quality");
+function detectDevice() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/i.test(ua)) return "iOS";
+  if (/Android/i.test(ua)) return "Android";
+  return "PC";
+}
 
-const qualityHint =
-  document.getElementById("quality-hint");
+deviceLabel.textContent = `기기: ${detectDevice()}`;
 
-const downloadBtn =
-  document.getElementById("download-btn");
+// ============================================================
+// Status
+// ============================================================
 
-const cancelBtn =
-  document.getElementById("cancel-btn");
-
-const statusEl =
-  document.getElementById("status");
-
-const progressBar =
-  document.getElementById("progress-bar");
-
-const diagnoseButton =
-  document.getElementById("diagnose-btn");
-
-const diagnoseResult =
-  document.getElementById("diagnose-result");
-
-const videoInfoEl =
-  document.getElementById("video-info");
-
-const deviceLabel =
-  document.getElementById("device-label");
-
-
-// =========================================================
-// 공통 상태
-// =========================================================
-
-function setStatus(message, kind = "info") {
-
-  statusEl.textContent = message;
-
+function setStatus(message, type = "info") {
+  statusElement.textContent = message;
   const colors = {
     info: "#4a9eff",
     ok: "#4caf50",
     warn: "#ff9800",
     err: "#e53935",
   };
-
-  statusEl.style.color =
-    colors[kind] || "#888";
+  statusElement.style.color = colors[type] || "#888";
 }
 
+// ============================================================
+// Quality rendering
+// ============================================================
 
-// =========================================================
-// 기기
-// =========================================================
-
-function initDeviceUI() {
-
-  const ua =
-    navigator.userAgent.toLowerCase();
-
-  let device = "PC";
-
-  if (
-    ua.includes("iphone") ||
-    ua.includes("ipad")
-  ) {
-    device = "iPhone / iPad";
-  } else if (
-    ua.includes("android")
-  ) {
-    device = "Android";
-  }
-
-  deviceLabel.textContent =
-    `${device} · 웹 다운로드`;
+function renderAudioQuality() {
+  qualitySelect.innerHTML = "";
+  ["320 kbps", "256 kbps", "192 kbps", "128 kbps", "96 kbps"]
+    .forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      if (value === "192 kbps") option.selected = true;
+      qualitySelect.appendChild(option);
+    });
 }
 
+function renderM4aQuality() {
+  // M4A는 원본 음질 그대로 → 선택 옵션 1개
+  qualitySelect.innerHTML = "";
+  const option = document.createElement("option");
+  option.value = "best";
+  option.textContent = "원본 음질 (재인코딩 없음)";
+  option.selected = true;
+  qualitySelect.appendChild(option);
+}
 
-// =========================================================
-// 품질
-// =========================================================
-
-function setQualityOptions(
-  heights
-) {
-
+function renderMp4Quality(heights) {
   qualitySelect.innerHTML = "";
 
-  if (
-    !Array.isArray(heights) ||
-    heights.length === 0
-  ) {
-
-    const option =
-      document.createElement("option");
-
+  if (!Array.isArray(heights) || heights.length === 0) {
+    const option = document.createElement("option");
     option.value = "";
-    option.textContent =
-      "사용 가능한 MP4 화질 없음";
-
+    option.textContent = "사용 가능한 MP4 화질 확인 실패";
     qualitySelect.appendChild(option);
-
     return;
   }
 
-  const sorted = [
-    ...new Set(
-      heights
-        .map(Number)
-        .filter(
-          Number.isFinite
-        )
-    ),
-  ].sort(
-    (a, b) => b - a
-  );
+  const uniqueHeights = [...new Set(heights.map(Number).filter(Number.isFinite))]
+    .sort((a, b) => b - a);
 
-  sorted.forEach(
-    (height, index) => {
-
-      const option =
-        document.createElement(
-          "option"
-        );
-
-      option.value =
-        `${height}p`;
-
-      option.textContent =
-        index === 0
-          ? `${height}p (기본)`
-          : `${height}p`;
-
-      if (index === 0) {
-        option.selected = true;
-      }
-
-      qualitySelect.appendChild(
-        option
-      );
-    }
-  );
-}
-
-
-function renderAudioQuality() {
-
-  qualitySelect.innerHTML = "";
-
-  const qualities = [
-    "128 kbps",
-    "192 kbps",
-    "256 kbps",
-    "320 kbps",
-  ];
-
-  qualities.forEach(
-    (quality) => {
-
-      const option =
-        document.createElement(
-          "option"
-        );
-
-      option.value = quality;
-      option.textContent = quality;
-
-      if (
-        quality === "192 kbps"
-      ) {
-        option.selected = true;
-      }
-
-      qualitySelect.appendChild(
-        option
-      );
-    }
-  );
-}
-
-
-// =========================================================
-// 형식 선택
-// =========================================================
-
-document
-  .querySelectorAll(
-    "[data-format]"
-  )
-  .forEach((button) => {
-
-    button.addEventListener(
-      "click",
-      () => {
-
-        document
-          .querySelectorAll(
-            "[data-format]"
-          )
-          .forEach(
-            (b) =>
-              b.classList.remove(
-                "active"
-              )
-          );
-
-        button.classList.add(
-          "active"
-        );
-
-        currentFormat =
-          button.dataset.format;
-
-        currentPlayerClient = null;
-
-        if (
-          currentFormat === "mp4"
-        ) {
-
-          qualityHint.textContent =
-            "YouTube에서 실제 제공되는 MP4 화질";
-
-          if (
-            currentVideoInfo &&
-            Array.isArray(
-              currentVideoInfo.mp4_qualities
-            )
-          ) {
-
-            setQualityOptions(
-              currentVideoInfo
-                .mp4_qualities
-            );
-
-          } else {
-
-            qualitySelect.innerHTML =
-              `<option value="">먼저 영상 정보를 확인하세요</option>`;
-          }
-
-        } else {
-
-          qualityHint.textContent =
-            currentFormat === "m4a"
-              ? "M4A 음질"
-              : "MP3 음질";
-
-          renderAudioQuality();
-        }
-      }
-    );
+  uniqueHeights.forEach((height, index) => {
+    const option = document.createElement("option");
+    option.value = `${height}p`;
+    option.textContent = index === 0 ? `${height}p (기본)` : `${height}p`;
+    option.selected = index === 0;
+    qualitySelect.appendChild(option);
   });
+}
 
-
-// =========================================================
-// 영상 정보
-// =========================================================
-
-async function fetchVideoInfo() {
-
-  const url =
-    urlInput.value.trim();
-
-  if (!url) {
-    throw new Error(
-      "YouTube URL을 입력하세요."
-    );
+function renderQuality() {
+  if (currentFormat === "mp3") {
+    renderAudioQuality();
+    qualityHint.textContent = "MP3 음질";
+    return;
   }
 
-  setStatus(
-    "YouTube 영상 정보를 확인하는 중...",
-    "info"
-  );
+  if (currentFormat === "m4a") {
+    renderM4aQuality();
+    qualityHint.textContent = "원본 음질";
+    return;
+  }
 
-  const controller =
-    new AbortController();
+  // MP4
+  if (currentVideoInfo) {
+    renderMp4Quality(currentVideoInfo.mp4_qualities);
+  } else {
+    qualitySelect.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "먼저 영상 정보를 확인하세요.";
+    qualitySelect.appendChild(option);
+  }
+  qualityHint.textContent = "YouTube에서 확인된 MP4 화질";
+}
 
-  const timeout =
-    setTimeout(
-      () => controller.abort(),
-      60000
+// ============================================================
+// Format buttons
+// ============================================================
+
+document.querySelectorAll(".chip").forEach((button) => {
+  button.addEventListener("click", async () => {
+    document.querySelectorAll(".chip").forEach((b) =>
+      b.classList.remove("active")
     );
+    button.classList.add("active");
+    currentFormat = button.dataset.format;
+    renderQuality();
+
+    if (currentFormat === "mp4") {
+      await loadVideoInfo();
+    }
+  });
+});
+
+// ============================================================
+// Load video information
+// ============================================================
+
+async function loadVideoInfo() {
+  const url = urlInput.value.trim();
+  if (!url) {
+    setStatus("먼저 YouTube URL을 입력하세요.", "warn");
+    return;
+  }
+
+  setStatus("영상 정보를 확인하는 중...", "info");
 
   try {
-
-    const response =
-      await fetch(
-        `${API_BASE}/api/info?url=` +
-        encodeURIComponent(url),
-        {
-          signal:
-            controller.signal,
-        }
-      );
-
-    const text =
-      await response.text();
-
-    let data = null;
-
-    try {
-      data = JSON.parse(text);
-    } catch (_) {
-      data = null;
-    }
+    const response = await fetch(
+      `${API_BASE}/api/info?url=` + encodeURIComponent(url)
+    );
+    const data = await response.json();
 
     if (!response.ok) {
-
-      const detail =
-        data?.detail;
-
-      if (
-        typeof detail === "object"
-      ) {
-
-        throw new Error(
-          `[${detail.code || "ERROR"}] ` +
-          `${detail.message || "영상 정보를 가져오지 못했습니다."}`
-        );
-
-      }
-
-      throw new Error(
-        text ||
-        `서버 오류 (${response.status})`
-      );
+      throw new Error(extractServerError(data));
     }
 
     currentVideoInfo = data;
+    videoInfo.classList.remove("hidden");
+    videoTitle.textContent = data.title || "영상";
 
-    currentPlayerClient =
-      data.player_client ||
-      null;
+    const clientText = data.client ? `client: ${data.client}` : "";
+    const durationText = data.duration ? formatDuration(data.duration) : "";
 
-    if (videoInfoEl) {
+    videoMeta.textContent = [data.uploader || "", durationText, clientText]
+      .filter(Boolean)
+      .join(" · ");
 
-      videoInfoEl.textContent =
-        [
-          data.title || "",
-          currentPlayerClient
-            ? `client: ${currentPlayerClient}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" · ");
-    }
-
-    if (
-      currentFormat === "mp4"
-    ) {
-
-      setQualityOptions(
-        data.mp4_qualities || []
-      );
-
-    }
+    renderQuality();
 
     setStatus(
-      currentPlayerClient
-        ? `영상 확인 완료 · ${currentPlayerClient}`
-        : "영상 확인 완료",
+      data.client ? `영상 확인 완료 · ${data.client}` : "영상 확인 완료",
       "ok"
     );
-
-    return data;
-
   } catch (error) {
-
-    if (
-      error.name ===
-      "AbortError"
-    ) {
-      throw new Error(
-        "영상 정보 확인 시간이 초과되었습니다."
-      );
-    }
-
-    throw error;
-
-  } finally {
-
-    clearTimeout(timeout);
+    currentVideoInfo = null;
+    videoInfo.classList.add("hidden");
+    renderQuality();
+    setStatus("영상 정보 확인 실패: " + error.message, "err");
   }
 }
 
+// ============================================================
+// Duration
+// ============================================================
 
-// =========================================================
-// 다운로드
-// =========================================================
+function formatDuration(seconds) {
+  const total = Number(seconds);
+  if (!Number.isFinite(total)) return "";
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = Math.floor(total % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
-downloadBtn.addEventListener(
-  "click",
-  startDownload
-);
+// ============================================================
+// Server error
+// ============================================================
 
+function extractServerError(data) {
+  if (!data) return "서버 오류";
+  if (typeof data.detail === "string") return data.detail;
+  if (data.detail && typeof data.detail === "object") {
+    if (data.detail.summary) return data.detail.summary;
+    if (data.detail.message) return data.detail.message;
+  }
+  if (data.message) return data.message;
+  return JSON.stringify(data);
+}
+
+// ============================================================
+// Download
+// ============================================================
+
+downloadButton.addEventListener("click", startDownload);
 
 async function startDownload() {
-
-  const url =
-    urlInput.value.trim();
-
+  const url = urlInput.value.trim();
   if (!url) {
-
-    setStatus(
-      "YouTube URL을 입력하세요.",
-      "warn"
-    );
-
+    setStatus("YouTube URL을 입력하세요.", "warn");
     urlInput.focus();
-
     return;
   }
 
-  downloadBtn.disabled = true;
-  cancelBtn.disabled = false;
+  if (currentFormat === "mp4" && !currentVideoInfo) {
+    await loadVideoInfo();
+    if (!currentVideoInfo) return;
+  }
 
-  progressBar.style.width =
-    "0%";
+  const quality = qualitySelect.value;
+  if (currentFormat === "mp4" && !quality) {
+    setStatus("사용 가능한 MP4 화질이 없습니다.", "err");
+    return;
+  }
+
+  const params = new URLSearchParams({
+    url,
+    format: currentFormat,
+    quality,
+  });
+
+  downloadButton.disabled = true;
+  cancelButton.disabled = false;
+  progressBar.style.width = "0%";
+
+  setStatus("서버에서 다운로드를 준비하는 중...", "info");
+
+  currentAbortController = new AbortController();
 
   try {
-
-    // ---------------------------------------------
-    // 1. 영상 정보 확인
-    // ---------------------------------------------
-
-    const info =
-      await fetchVideoInfo();
-
-    const quality =
-      qualitySelect.value;
-
-    if (
-      currentFormat === "mp4" &&
-      !quality
-    ) {
-
-      throw new Error(
-        "사용 가능한 MP4 화질이 없습니다."
-      );
-    }
-
-    // ---------------------------------------------
-    // 2. 다운로드
-    // ---------------------------------------------
-
-    const params =
-      new URLSearchParams({
-        url,
-        format:
-          currentFormat,
-        quality,
-      });
-
-    if (currentPlayerClient) {
-
-      params.set(
-        "player_client",
-        currentPlayerClient
-      );
-    }
-
-    setStatus(
-      `다운로드 준비 중... ` +
-      `(${currentPlayerClient || "fallback"})`,
-      "info"
-    );
-
-    currentAbort =
-      new AbortController();
-
-    const response =
-      await fetch(
-        `${API_BASE}/api/download?${params}`,
-        {
-          signal:
-            currentAbort.signal,
-        }
-      );
+    const response = await fetch(`${API_BASE}/api/download?${params}`, {
+      signal: currentAbortController.signal,
+    });
 
     if (!response.ok) {
-
-      const text =
-        await response.text();
-
-      let message = text;
-
+      const text = await response.text().catch(() => "");
+      let message = text || `서버 오류 (${response.status})`;
       try {
-
-        const data =
-          JSON.parse(text);
-
-        if (
-          typeof data.detail ===
-          "object"
-        ) {
-
-          message =
-            `[${data.detail.code || "ERROR"}] ` +
-            `${data.detail.message || ""}`;
-        } else if (
-          data.detail
-        ) {
-
-          message =
-            String(
-              data.detail
-            );
-        }
-
+        const parsed = JSON.parse(text);
+        message = extractServerError(parsed);
       } catch (_) {}
-
-      throw new Error(
-        message ||
-        `서버 오류 (${response.status})`
-      );
+      throw new Error(message);
     }
 
-    // ---------------------------------------------
-    // 3. 파일명
-    // ---------------------------------------------
-
+    // 파일명
     let filename =
       currentFormat === "mp3"
         ? "audio.mp3"
@@ -537,392 +293,177 @@ async function startDownload() {
         ? "audio.m4a"
         : "video.mp4";
 
-    const disposition =
-      response.headers.get(
-        "content-disposition"
-      ) || "";
-
-    const match =
-      disposition.match(
-        /filename\*=UTF-8''([^;]+)/i
-      );
-
-    if (match) {
-
-      try {
-
-        filename =
-          decodeURIComponent(
-            match[1]
-          );
-
-      } catch (_) {}
-    }
-
-    // ---------------------------------------------
-    // 4. 파일 수신
-    // ---------------------------------------------
-
-    const total = parseInt(
-      response.headers.get(
-        "content-length"
-      ) || "0",
-      10
+    const disposition = response.headers.get("content-disposition") || "";
+    const match = disposition.match(
+      /filename\*?=(?:UTF-8'')?["']?([^;"']+)["']?/i
     );
 
-    const reader =
-      response.body.getReader();
+    if (match) {
+      try {
+        filename = decodeURIComponent(match[1]);
+      } catch (_) {
+        filename = match[1];
+      }
+    }
 
+    const usedClient = response.headers.get("X-YTDLP-Client") || "";
+
+    // Streaming
+    const total = parseInt(response.headers.get("content-length") || "0", 10);
+    const reader = response.body.getReader();
     const chunks = [];
-
     let received = 0;
 
     while (true) {
-
-      const {
-        done,
-        value,
-      } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
+      const { done, value } = await reader.read();
+      if (done) break;
       chunks.push(value);
+      received += value.length;
 
-      received +=
-        value.length;
-
-      if (total) {
-
-        const percent =
-          Math.min(
-            100,
-            received /
-              total *
-              100
-          );
-
-        progressBar.style.width =
-          percent.toFixed(1) +
-          "%";
-
-        setStatus(
-          `다운로드 중... ${percent.toFixed(1)}%`,
-          "info"
-        );
-
+      if (total > 0) {
+        const percent = Math.min(100, (received / total) * 100);
+        progressBar.style.width = `${percent.toFixed(1)}%`;
+        setStatus(`다운로드 중... ${percent.toFixed(1)}%`, "info");
       } else {
-
         setStatus(
-          `다운로드 중... ` +
-          `${(
-            received /
-            1024 /
-            1024
-          ).toFixed(1)} MB`,
+          `다운로드 중... ${(received / 1024 / 1024).toFixed(1)} MB`,
           "info"
         );
       }
     }
 
-    // ---------------------------------------------
-    // 5. 저장
-    // ---------------------------------------------
+    const blob = new Blob(chunks, {
+      type:
+        currentFormat === "mp3"
+          ? "audio/mpeg"
+          : currentFormat === "m4a"
+          ? "audio/mp4"
+          : "video/mp4",
+    });
 
-    const mime =
-      currentFormat === "mp3"
-        ? "audio/mpeg"
-        : currentFormat === "m4a"
-        ? "audio/mp4"
-        : "video/mp4";
-
-    const blob =
-      new Blob(
-        chunks,
-        { type: mime }
-      );
-
-    const objectUrl =
-      URL.createObjectURL(
-        blob
-      );
-
-    const link =
-      document.createElement(
-        "a"
-      );
-
-    link.href =
-      objectUrl;
-
-    link.download =
-      filename;
-
-    document.body.appendChild(
-      link
-    );
-
+    const link = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
     link.click();
-
     link.remove();
 
-    setTimeout(
-      () =>
-        URL.revokeObjectURL(
-          objectUrl
-        ),
-      30000
-    );
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
 
-    progressBar.style.width =
-      "100%";
+    progressBar.style.width = "100%";
 
     setStatus(
-      "다운로드 완료",
+      usedClient ? `다운로드 완료 · ${usedClient}` : "다운로드 완료",
       "ok"
     );
-
   } catch (error) {
-
-    if (
-      error.name ===
-      "AbortError"
-    ) {
-
-      setStatus(
-        "다운로드가 취소되었습니다.",
-        "warn"
-      );
-
+    if (error.name === "AbortError") {
+      setStatus("다운로드가 취소되었습니다.", "warn");
     } else {
-
       console.error(error);
-
       setStatus(
-        "다운로드 실패: " +
-        error.message,
+        "다운로드 실패: " + error.message + " · 자동 진단을 시작합니다.",
         "err"
       );
-
-      // -------------------------------------------
-      // 자동 진단
-      // -------------------------------------------
-
-      await runDiagnosis(
-        false
-      );
+      await runDiagnosis(true);
     }
-
   } finally {
-
-    downloadBtn.disabled =
-      false;
-
-    cancelBtn.disabled =
-      true;
-
-    currentAbort = null;
+    downloadButton.disabled = false;
+    cancelButton.disabled = true;
+    currentAbortController = null;
   }
 }
 
+// ============================================================
+// Cancel
+// ============================================================
 
-// =========================================================
-// 취소
-// =========================================================
-
-cancelBtn.addEventListener(
-  "click",
-  () => {
-
-    if (currentAbort) {
-
-      currentAbort.abort();
-
-      setStatus(
-        "취소 중...",
-        "warn"
-      );
-    }
+cancelButton.addEventListener("click", () => {
+  if (currentAbortController) {
+    currentAbortController.abort();
+    setStatus("취소 중...", "warn");
   }
-);
+});
 
+// ============================================================
+// Diagnosis
+// ============================================================
 
-// =========================================================
-// 진단
-// =========================================================
+diagnoseButton.addEventListener("click", () => runDiagnosis(false));
 
-diagnoseButton.addEventListener(
-  "click",
-  () =>
-    runDiagnosis(true)
-);
-
-
-async function runDiagnosis(
-  manual = true
-) {
-
-  const url =
-    urlInput.value.trim();
-
+async function runDiagnosis(automatic) {
+  const url = urlInput.value.trim();
   if (!url) {
-
-    if (manual) {
-
-      setStatus(
-        "진단할 YouTube URL을 입력하세요.",
-        "warn"
-      );
-    }
-
+    if (!automatic) setStatus("진단하려면 YouTube URL을 입력하세요.", "warn");
     return;
   }
 
-  diagnoseButton.disabled =
-    true;
-
-  diagnoseResult.textContent =
-    "진단 중...\n";
+  diagnoseButton.disabled = true;
+  diagnoseResult.textContent = "진단 중...\n\n";
 
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90000);
 
-    const controller =
-      new AbortController();
+    const response = await fetch(
+      `${API_BASE}/api/diagnose?url=` + encodeURIComponent(url),
+      { signal: controller.signal }
+    );
+    clearTimeout(timer);
 
-    const timeout =
-      setTimeout(
-        () => controller.abort(),
-        120000
-      );
+    const data = await response.json();
 
-    const response =
-      await fetch(
-        `${API_BASE}/api/diagnose?url=` +
-        encodeURIComponent(url),
-        {
-          signal:
-            controller.signal,
-        }
-      );
-
-    clearTimeout(timeout);
-
-    const text =
-      await response.text();
-
-    let data;
-
-    try {
-
-      data =
-        JSON.parse(text);
-
-    } catch (_) {
-
-      data = {
-        raw: text,
-      };
+    if (!response.ok) {
+      throw new Error(extractServerError(data));
     }
 
-    diagnoseResult.textContent =
-      JSON.stringify(
-        data,
-        null,
-        2
-      );
+    diagnoseResult.textContent = JSON.stringify(data, null, 2);
 
-    if (data?.clients) {
-
-      const success =
-        data.clients.find(
-          (item) =>
-            item.ok
-        );
-
-      if (success) {
-
-        currentPlayerClient =
-          success.client;
-
-        setStatus(
-          `진단 성공 client: ${success.client}`,
-          "ok"
-        );
-
-      } else if (manual) {
-
-        setStatus(
-          "모든 YouTube client 진단 실패",
-          "err"
-        );
-      }
-    }
-
-  } catch (error) {
-
-    diagnoseResult.textContent =
-      "진단 오류: " +
-      error.message;
-
-    if (manual) {
-
+    if (
+      Array.isArray(data.successful_clients) &&
+      data.successful_clients.length
+    ) {
       setStatus(
-        "진단 요청 실패",
-        "err"
+        `${automatic ? "자동 진단" : "진단"} 완료 · 성공 client: ${
+          data.successful_clients[0]
+        }`,
+        "ok"
       );
+    } else {
+      setStatus("진단 완료 · 성공한 client가 없습니다.", "err");
     }
-
+  } catch (error) {
+    diagnoseResult.textContent = "진단 실패\n\n" + error.message;
+    setStatus("진단 요청 자체가 실패했습니다.", "err");
   } finally {
-
-    diagnoseButton.disabled =
-      false;
+    diagnoseButton.disabled = false;
   }
 }
 
+// ============================================================
+// URL 변경 시 초기화
+// ============================================================
 
-// =========================================================
-// URL 변경 시 client 초기화
-// =========================================================
+urlInput.addEventListener("change", () => {
+  currentVideoInfo = null;
+  videoInfo.classList.add("hidden");
+  if (currentFormat === "mp4") renderQuality();
+});
 
-urlInput.addEventListener(
-  "input",
-  () => {
-
-    currentPlayerClient = null;
-    currentVideoInfo = null;
-
-    if (videoInfoEl) {
-      videoInfoEl.textContent = "";
-    }
-  }
-);
-
-
-// =========================================================
+// ============================================================
 // 초기화
-// =========================================================
+// ============================================================
 
-initDeviceUI();
-
-renderAudioQuality();
-
+renderQuality();
 urlInput.focus();
 
-
-// =========================================================
+// ============================================================
 // Service Worker
-// =========================================================
+// ============================================================
 
-if (
-  "serviceWorker" in navigator
-) {
-
-  navigator.serviceWorker
-    .register(
-      "service-worker.js"
-    )
-    .catch(
-      () => {}
-    );
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  });
 }
