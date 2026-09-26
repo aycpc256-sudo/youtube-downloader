@@ -7,28 +7,41 @@
   <title>개인용 YouTube Downloader</title>
   <link rel="stylesheet" href="styles.css" />
   <style>
-    .page-nav { display:flex; gap:8px; margin-bottom:14px; }
-    .page-nav a {
-      display:inline-block; padding:9px 13px; border-radius:10px;
-      background:#222; color:#fff; text-decoration:none; font-size:14px;
+    .page-nav {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
     }
-    .page-nav a.active { background:#444; }
+    .page-nav a {
+      display: inline-block;
+      padding: 9px 13px;
+      border-radius: 10px;
+      background: #222;
+      color: #fff;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .page-nav a.active {
+      background: #444;
+    }
   </style>
 </head>
 
 <body>
+
 <main class="app">
 
-  <div class="page-nav">
-    <a class="active" href="index.html">Downloader</a>
-    <a href="diagnostic.html">서버 진단</a>
-  </div>
+  <nav class="page-nav" aria-label="페이지 이동">
+    <a class="active" href="./index.html">Downloader</a>
+    <a href="./diagnostic.html">서버 진단</a>
+  </nav>
 
   <header class="header">
     <h1>개인용 Downloader</h1>
     <p id="device-label" class="subtitle">기기 확인 중...</p>
   </header>
 
+  <!-- URL -->
   <section class="card">
     <label for="url" class="label">YouTube URL</label>
     <input
@@ -40,6 +53,7 @@
     />
   </section>
 
+  <!-- Format -->
   <section class="card">
     <div class="label">다운로드 형식</div>
     <div class="row">
@@ -56,36 +70,38 @@
     <select id="quality"></select>
   </section>
 
+  <!-- Video information -->
   <section id="video-info" class="card hidden">
     <div id="video-title" class="video-title"></div>
     <div id="video-meta" class="hint"></div>
   </section>
 
+  <!-- Buttons -->
   <button id="download-btn" class="primary" type="button">다운로드</button>
   <button id="cancel-btn" class="secondary" type="button" disabled>취소</button>
 
+  <!-- Progress -->
   <div class="progress-wrap">
     <div id="progress-bar" class="progress-bar"></div>
   </div>
-
   <p id="status" class="status">대기 중</p>
 
-  <section class="card diagnose-card">
+  <section class="card">
     <div class="row between">
       <div>
         <div class="label">서버 진단</div>
-        <div class="hint">상세 진단은 별도 페이지에서 확인</div>
+        <div class="hint">별도 페이지에서 Render / YouTube 상태를 확인합니다.</div>
       </div>
-      <a class="ghost" href="diagnostic.html" style="text-decoration:none;">진단 페이지</a>
+      <a class="ghost" href="./diagnostic.html" style="text-decoration:none;">진단 열기</a>
     </div>
   </section>
 
   <footer class="footer">
     개인용 · 본인이 소유하거나 다운로드 권한이 있는 콘텐츠에만 사용하세요.
   </footer>
-
 </main>
 
 <script src="app.js"></script>
+
 </body>
 </html>

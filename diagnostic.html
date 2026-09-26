@@ -7,59 +7,94 @@
   <title>Render / YouTube 서버 진단</title>
   <link rel="stylesheet" href="styles.css" />
   <style>
-    .diag-nav { display:flex; gap:8px; margin-bottom:14px; }
-    .diag-nav a {
-      display:inline-block; padding:9px 13px; border-radius:10px;
-      background:#222; color:#fff; text-decoration:none; font-size:14px;
+    .page-nav {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
     }
-    .diag-nav a.active { background:#444; }
-    .diag-actions { display:flex; gap:8px; margin-top:12px; }
-    .diag-actions button { flex:1; }
+    .page-nav a {
+      display: inline-block;
+      padding: 9px 13px;
+      border-radius: 10px;
+      background: #222;
+      color: #fff;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .page-nav a.active {
+      background: #444;
+    }
+    .diag-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .diag-actions > * {
+      flex: 1;
+    }
     .diag-summary {
-      display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:8px; margin-top:14px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
     }
     .diag-item {
-      background:#181818; border:1px solid #2d2d2d; border-radius:10px;
-      padding:10px;
+      background: #181818;
+      border: 1px solid #2d2d2d;
+      border-radius: 10px;
+      padding: 10px;
     }
-    .diag-item .k { color:#999; font-size:12px; }
-    .diag-item .v { margin-top:4px; font-weight:600; word-break:break-word; }
-    .ok { color:#4caf50; }
-    .bad { color:#e53935; }
-    .warn { color:#ff9800; }
-    .muted { color:#999; }
-    .client {
-      margin-top:10px; padding:12px; border:1px solid #2d2d2d;
-      border-radius:10px; background:#181818;
+    .diag-item .k {
+      color: #999;
+      font-size: 12px;
     }
-    .client-head { display:flex; justify-content:space-between; gap:8px; }
-    pre.diag-json {
-      white-space:pre-wrap; word-break:break-word; overflow:auto;
-      max-height:520px; margin:14px 0 0; padding:12px;
-      background:#101010; border-radius:10px; font-size:12px;
+    .diag-item .v {
+      margin-top: 4px;
+      font-weight: 600;
+      word-break: break-word;
     }
-    .small-note { font-size:12px; color:#888; margin-top:10px; line-height:1.5; }
+    .ok { color: #4caf50; }
+    .bad { color: #e53935; }
+    .warn { color: #ff9800; }
+    .muted { color: #999; }
+    .diag-json {
+      width: 100%;
+      box-sizing: border-box;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow: auto;
+      max-height: 560px;
+      margin-top: 12px;
+      padding: 12px;
+      background: #101010;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+    .diag-note {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.5;
+    }
   </style>
 </head>
 
 <body>
 <main class="app">
 
-  <div class="diag-nav">
-    <a href="index.html">Downloader</a>
-    <a class="active" href="diagnostic.html">서버 진단</a>
-  </div>
+  <nav class="page-nav" aria-label="페이지 이동">
+    <a href="./index.html">Downloader</a>
+    <a class="active" href="./diagnostic.html">서버 진단</a>
+  </nav>
 
   <header class="header">
     <h1>Render / YouTube 진단</h1>
-    <p class="subtitle">현재 Render 서버에서 YouTube 접근 상태를 확인합니다.</p>
+    <p class="subtitle">현재 Render 백엔드에서 YouTube 접근 상태를 확인합니다.</p>
   </header>
 
   <section class="card">
-    <label for="diag-url" class="label">YouTube URL</label>
+    <label for="diagnostic-url" class="label">YouTube URL</label>
     <input
-      id="diag-url"
+      id="diagnostic-url"
       type="url"
       inputmode="url"
       autocomplete="off"
@@ -80,7 +115,7 @@
   </section>
 
   <section id="clients-card" class="card hidden">
-    <div class="label">YouTube Client별 결과</div>
+    <div class="label">YouTube Client 결과</div>
     <div id="clients"></div>
   </section>
 
@@ -88,20 +123,20 @@
     <div class="row between">
       <div>
         <div class="label">상세 JSON</div>
-        <div class="hint">Render 로그와 함께 확인할 때 사용합니다.</div>
+        <div class="diag-note">문제 분석을 위해 결과 전체를 확인할 수 있습니다.</div>
       </div>
       <button id="copy-btn" class="ghost" type="button">복사</button>
     </div>
     <pre id="raw-json" class="diag-json"></pre>
   </section>
 
-  <p class="small-note">
-    진단은 서버 상태와 YouTube 접근 문제를 확인하기 위한 용도입니다.
+  <p class="diag-note">
+    진단은 서버와 YouTube 접근 상태를 확인하기 위한 기능입니다.
     다운로드 권한이 있는 콘텐츠만 사용하세요.
   </p>
 
 </main>
 
-<script src="diagnostic.js"></script>
+<script src="./diagnostic.js"></script>
 </body>
 </html>
