@@ -2,12 +2,12 @@ import base64
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
-import urllib.error
 import urllib.request
+from importlib.metadata import version as pkg_version
 from pathlib import Path
-from urllib.parse import urlparse
 
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query
@@ -16,12 +16,16 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 
-app = FastAPI(title="Personal YouTube Downloader API")
+# ============================================================
+# FastAPI
+# ============================================================
+
+app = FastAPI(title="YouTube Downloader API")
 
 
-# =========================================================
+# ============================================================
 # CORS
-# =========================================================
+# ============================================================
 
 ALLOWED_ORIGINS = [
     "https://aycpc256-sudo.github.io",
@@ -42,776 +46,981 @@ app.add_middleware(
 )
 
 
-# =========================================================
-# YouTube URL
-# =========================================================
+# ============================================================
+# 기본 설정
+# ============================================================
 
-HOSTS = {
-    "youtube.com",
-    "www.youtube.com",
-    "m.youtube.com",
-    "youtu.be",
-}
+BGUTIL_PORT = int(
+    os.environ.get("BGUTIL_PORT", "4416")
+)
+
+RE_URL = re.compile(
+    r"^https?://",
+    re.IGNORECASE
+)
 
 
-def validate_youtube_url(url: str):
-    parsed = urlparse(url)
-    hostname = (parsed.hostname or "").lower()
+# ============================================================
+# URL 검사
+# ============================================================
 
-    if parsed.scheme not in {"http", "https"}:
+def validate_url(url: str):
+    if not RE_URL.match(url):
         raise HTTPException(
-            400,
-            "http 또는 https 주소만 사용할 수 있습니다.",
+            status_code=400,
+            detail="URL 형식이 아닙니다."
         )
 
-    if hostname not in HOSTS:
-        raise HTTPException(
-            400,
-            "YouTube 주소만 사용할 수 있습니다.",
-        )
 
-    return url
+# ============================================================
+# 파일명 정리
+# ============================================================
+
+def safe_filename(name: str) -> str:
+    name = re.sub(
+        r'["\\\r\n\x00-\x1f]',
+        "",
+        name
+    )
+
+    return name.strip() or "download"
 
 
-# =========================================================
-# Cookie
+# ============================================================
+# YouTube 쿠키 준비
 #
-# 지원:
-# 1) YOUTUBE_COOKIES = Netscape cookies.txt 전체 내용
-# 2) YT_COOKIES_B64 = cookies.txt Base64
-#
-# 쿠키 내용은 API 응답으로 절대 노출하지 않음
-# =========================================================
+# Render Environment Variable:
+# YOUTUBE_COOKIES
+# ============================================================
 
-COOKIE_FILE = "/tmp/youtube-cookies.txt"
-
-
-def prepare_cookies():
-    raw_cookie = os.environ.get(
+def prepare_youtube_cookies():
+    raw_value = os.environ.get(
         "YOUTUBE_COOKIES",
-        "",
+        ""
     ).strip()
 
-    if raw_cookie:
+    if not raw_value:
+        return None
+
+    cookie_path = "/tmp/youtube-cookies.txt"
+
+    cookie_text = raw_value
+
+    # Base64 형태도 허용
+    if not raw_value.startswith("#"):
         try:
-            Path(COOKIE_FILE).write_text(
-                raw_cookie,
-                encoding="utf-8",
+            decoded = base64.b64decode(
+                raw_value,
+                validate=True
+            ).decode(
+                "utf-8",
+                errors="ignore"
             )
 
-            if Path(COOKIE_FILE).stat().st_size > 0:
-                return COOKIE_FILE
+            if (
+                decoded.startswith(
+                    "# Netscape HTTP Cookie File"
+                )
+                or decoded.startswith(
+                    "# HTTP Cookie File"
+                )
+            ):
+                cookie_text = decoded
 
-        except Exception as e:
-            print("YOUTUBE_COOKIES preparation failed:", e)
+        except Exception:
+            pass
 
-    encoded_cookie = os.environ.get(
-        "YT_COOKIES_B64",
-        "",
-    ).strip()
+    try:
+        with open(
+            cookie_path,
+            "w",
+            encoding="utf-8",
+            newline="\n"
+        ) as f:
 
-    if encoded_cookie:
-        try:
-            data = base64.b64decode(
-                encoded_cookie,
-                validate=True,
-            )
+            f.write(cookie_text)
 
-            Path(COOKIE_FILE).write_bytes(data)
+            if not cookie_text.endswith("\n"):
+                f.write("\n")
 
-            if Path(COOKIE_FILE).stat().st_size > 0:
-                return COOKIE_FILE
+        return cookie_path
 
-        except Exception as e:
-            print("YT_COOKIES_B64 preparation failed:", e)
-
-    return None
+    except Exception as e:
+        raise RuntimeError(
+            f"YouTube 쿠키 파일 생성 실패: {e}"
+        )
 
 
-COOKIE_PATH = prepare_cookies()
+# ============================================================
+# 공통 yt-dlp 옵션
+# ============================================================
 
+def get_base_options():
 
-# =========================================================
-# 공통 yt-dlp 설정
-# =========================================================
-
-def base_options(tmp_dir: str):
     options = {
-        "outtmpl": str(
-            Path(tmp_dir) / "%(title).150B [%(id)s].%(ext)s"
-        ),
-
-        "noplaylist": True,
-
         "quiet": True,
         "no_warnings": True,
+        "noplaylist": True,
+        "no_mtime": True,
+        "no_overwrites": True,
 
         "retries": 3,
         "fragment_retries": 3,
-        "continuedl": True,
 
-        "nocheckcertificate": True,
+        "socket_timeout": 30,
 
-        # YouTube PO Token Provider
         "extractor_args": {
             "youtube": {
                 "player_client": [
                     "mweb"
-                ],
+                ]
             },
 
             "youtubepot-bgutilhttp": {
-                "base_url": [
-                    "http://127.0.0.1:4416"
-                ],
+                "base_url": (
+                    f"http://127.0.0.1:{BGUTIL_PORT}"
+                )
             },
-        },
-
-        # yt-dlp JS challenge
-        "js_runtimes": {
-            "deno": {}
-        },
-
-        "remote_components": {
-            "ejs": ["github"]
         },
     }
 
-    if COOKIE_PATH and os.path.isfile(COOKIE_PATH):
-        options["cookiefile"] = COOKIE_PATH
+    cookie_path = prepare_youtube_cookies()
+
+    if cookie_path:
+        options["cookiefile"] = cookie_path
 
     return options
 
 
-# =========================================================
-# 파일명
-# =========================================================
-
-def safe_filename(name: str):
-    name = re.sub(
-        r'[<>:"/\\|?*\x00-\x1f]',
-        "_",
-        name,
-    ).strip(" .")
-
-    return (name or "download")[:180]
-
-
-# =========================================================
-# Health
-# =========================================================
-
-@app.get("/api/health")
-def health():
-    return {
-        "ok": True,
-        "service": "youtube-downloader",
-
-        "yt_dlp": getattr(
-            yt_dlp,
-            "__version__",
-            "unknown",
-        ),
-
-        "cookies": bool(COOKIE_PATH),
-
-        "pot_provider": True,
-
-        "js_runtime": "deno",
-        "player_client": "mweb",
-    }
-
-
-# =========================================================
+# ============================================================
 # FFmpeg 검사
-# =========================================================
+# ============================================================
 
 def check_ffmpeg():
+
     try:
-        result = subprocess.run(
+
+        proc = subprocess.run(
             [
                 "ffmpeg",
-                "-version",
+                "-version"
             ],
             capture_output=True,
             text=True,
             timeout=10,
         )
 
-        if result.returncode == 0:
-            first_line = (
-                result.stdout.strip()
-                .splitlines()[0]
-                if result.stdout.strip()
-                else "FFmpeg 정상"
-            )
-
-            return {
-                "ok": True,
-                "message": first_line,
-            }
-
-        return {
-            "ok": False,
-            "message": "ffmpeg 실행 실패",
-        }
-
-    except Exception as e:
-        return {
-            "ok": False,
-            "message": str(e),
-        }
-
-
-# =========================================================
-# BgUtils 검사
-# =========================================================
-
-def check_bgutil():
-    url = "http://127.0.0.1:4416/ping"
-
-    try:
-        request = urllib.request.Request(
-            url,
-            method="GET",
+        first_line = (
+            proc.stdout.splitlines()[0]
+            if proc.stdout
+            else ""
         )
 
-        with urllib.request.urlopen(
-            request,
-            timeout=8,
-        ) as response:
-
-            body = response.read().decode(
-                "utf-8",
-                errors="replace",
-            )
-
-            return {
-                "ok": True,
-                "status": response.status,
-                "message": body[:1000],
-            }
+        return {
+            "ok": proc.returncode == 0,
+            "message": first_line or "FFmpeg 확인 완료",
+        }
 
     except Exception as e:
+
         return {
             "ok": False,
             "message": str(e),
         }
 
 
-# =========================================================
-# YouTube HTTP 연결 검사
-# =========================================================
+# ============================================================
+# BgUtils 검사
+# ============================================================
 
-def check_youtube_http():
-    url = "https://www.youtube.com/"
+def check_bgutil():
+
+    result = {
+        "tcp": False,
+        "ping": False,
+        "message": "",
+    }
 
     try:
+
+        sock = socket.create_connection(
+            (
+                "127.0.0.1",
+                BGUTIL_PORT
+            ),
+            timeout=3
+        )
+
+        sock.close()
+
+        result["tcp"] = True
+
+    except Exception as e:
+
+        result["message"] = (
+            f"TCP 실패: {e}"
+        )
+
+    try:
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{BGUTIL_PORT}/ping",
+            timeout=5
+        ) as response:
+
+            body = (
+                response.read()
+                .decode(
+                    errors="ignore"
+                )
+            )
+
+            result["ping"] = True
+            result["message"] = body[:200]
+
+    except Exception as e:
+
+        if not result["message"]:
+            result["message"] = (
+                f"ping 실패: {e}"
+            )
+
+    return result
+
+
+# ============================================================
+# YouTube HTTP 검사
+# ============================================================
+
+def check_youtube_http():
+
+    try:
+
         request = urllib.request.Request(
-            url,
+            "https://www.youtube.com/",
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 "
                     "(Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 "
                     "(KHTML, like Gecko) "
-                    "Chrome/140.0 Safari/537.36"
-                ),
-            },
+                    "Chrome/131.0 Safari/537.36"
+                )
+            }
         )
 
         with urllib.request.urlopen(
             request,
-            timeout=15,
+            timeout=15
         ) as response:
 
             return {
                 "ok": True,
                 "status": response.status,
-                "message": "YouTube 연결 정상",
+                "message": "YouTube 연결 성공",
             }
 
-    except urllib.error.HTTPError as e:
-        return {
-            "ok": False,
-            "status": e.code,
-            "message": f"HTTP {e.code}",
-        }
-
     except Exception as e:
+
         return {
             "ok": False,
+            "status": None,
             "message": str(e),
         }
 
 
-# =========================================================
-# Player Client 검사
-#
-# 각 client의 실제 오류를 보존해서 반환
-# =========================================================
+# ============================================================
+# Health
+# ============================================================
 
-PLAYER_CLIENTS = [
-    "mweb",
-    "web_safari",
-    "web_embedded",
-    "android_vr",
-    "tv",
-]
-
-
-def test_player_client(
-    url: str,
-    client: str,
-):
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "noplaylist": True,
-
-        "extractor_args": {
-            "youtube": {
-                "player_client": [
-                    client
-                ],
-            },
-
-            "youtubepot-bgutilhttp": {
-                "base_url": [
-                    "http://127.0.0.1:4416"
-                ],
-            },
-        },
-
-        "js_runtimes": {
-            "deno": {}
-        },
-
-        "remote_components": {
-            "ejs": ["github"]
-        },
-    }
-
-    if COOKIE_PATH and os.path.isfile(COOKIE_PATH):
-        options["cookiefile"] = COOKIE_PATH
+@app.get("/api/health")
+def health():
 
     try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            data = ydl.extract_info(
-                url,
-                download=False,
-            )
+        yt_version = pkg_version(
+            "yt-dlp"
+        )
 
-        return {
-            "client": client,
-            "ok": True,
-            "title": data.get("title"),
-            "formats": len(
-                data.get("formats") or []
-            ),
-        }
+    except Exception:
+        yt_version = "unknown"
 
-    except Exception as e:
-        message = str(e)
+    cookie_enabled = bool(
+        os.environ.get(
+            "YOUTUBE_COOKIES",
+            ""
+        ).strip()
+    )
 
-        return {
-            "client": client,
-            "ok": False,
-            "error": message[-2500:],
-        }
+    bgutil = check_bgutil()
 
-
-# =========================================================
-# 진단 API
-# =========================================================
-
-@app.get("/api/diagnose")
-def diagnose(
-    url: str = Query(..., min_length=10),
-):
-    validate_youtube_url(url)
-
-    result = {
-        "ok": False,
-        "yt_dlp": getattr(
-            yt_dlp,
-            "__version__",
-            "unknown",
+    return {
+        "ok": True,
+        "service": "youtube-downloader",
+        "yt_dlp": yt_version,
+        "cookies": cookie_enabled,
+        "pot_provider": (
+            bgutil["tcp"]
+            and bgutil["ping"]
         ),
-
-        "cookies": {
-            "configured": bool(COOKIE_PATH),
-        },
-
-        "youtube_http": None,
-        "bgutil": None,
-        "ffmpeg": None,
-
-        "clients": [],
-
-        "diagnosis": {
-            "level": "warn",
-            "title": "진단 중",
-        },
+        "js_runtime": "deno",
+        "player_client": "mweb",
     }
 
-    # -----------------------------------------------------
-    # YouTube HTTP
-    # -----------------------------------------------------
 
-    result["youtube_http"] = check_youtube_http()
+# ============================================================
+# 테스트 엔드포인트
+# ============================================================
 
-    # -----------------------------------------------------
-    # BgUtils
-    # -----------------------------------------------------
+@app.get("/api/test123")
+def test123():
 
-    result["bgutil"] = check_bgutil()
-
-    # -----------------------------------------------------
-    # FFmpeg
-    # -----------------------------------------------------
-
-    result["ffmpeg"] = check_ffmpeg()
-
-    # -----------------------------------------------------
-    # Player clients
-    # -----------------------------------------------------
-
-    for client in PLAYER_CLIENTS:
-        result["clients"].append(
-            test_player_client(
-                url,
-                client,
-            )
-        )
-
-    successful_clients = [
-        item
-        for item in result["clients"]
-        if item.get("ok") is True
-    ]
-
-    # -----------------------------------------------------
-    # 종합 진단
-    # -----------------------------------------------------
-
-    if successful_clients:
-        result["ok"] = True
-
-        result["diagnosis"] = {
-            "level": "ok",
-            "title": (
-                "사용 가능한 YouTube Player Client가 "
-                "확인되었습니다."
-            ),
-        }
-
-    elif not result["youtube_http"]["ok"]:
-        status = result["youtube_http"].get(
-            "status"
-        )
-
-        result["diagnosis"] = {
-            "level": "error",
-            "title": (
-                f"YouTube 연결 실패 "
-                f"(HTTP {status})"
-                if status
-                else "YouTube 연결 실패"
-            ),
-        }
-
-    elif not result["bgutil"]["ok"]:
-        result["diagnosis"] = {
-            "level": "error",
-            "title": (
-                "BgUtils / PO Token Provider 연결 실패"
-            ),
-        }
-
-    else:
-        result["diagnosis"] = {
-            "level": "error",
-            "title": (
-                "모든 Player Client에서 "
-                "YouTube player response를 가져오지 못했습니다."
-            ),
-        }
-
-    return result
+    return {
+        "ok": True,
+        "message": "NEW_SERVER_PY_IS_RUNNING"
+    }
 
 
-# =========================================================
+# ============================================================
 # 영상 정보
-# =========================================================
+# ============================================================
 
 @app.get("/api/info")
 def info(
-    url: str = Query(..., min_length=10),
-):
-    validate_youtube_url(url)
-
-    options = base_options(
-        tempfile.mkdtemp(
-            prefix="ytdl_info_"
-        )
+    url: str = Query(
+        ...,
+        min_length=10
     )
+):
 
-    # 정보 조회에서는 다운로드하지 않음
-    options["skip_download"] = True
+    validate_url(url)
+
+    options = get_base_options()
+
+    options.update({
+        "skip_download": True,
+    })
 
     try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            data = ydl.extract_info(
-                url,
-                download=False,
-            )
-
-        formats = []
-
-        for f in data.get("formats") or []:
-            height = f.get("height")
-
-            if not height:
-                continue
-
-            ext = (
-                f.get("ext")
-                or ""
-            ).lower()
-
-            video_ext = (
-                f.get("video_ext")
-                or ""
-            ).lower()
-
-            if ext != "mp4" and video_ext != "mp4":
-                continue
-
-            formats.append({
-                "format_id": f.get("format_id"),
-                "height": height,
-                "width": f.get("width"),
-                "ext": ext,
-                "video_ext": video_ext,
-                "fps": f.get("fps"),
-                "vcodec": f.get("vcodec"),
-                "acodec": f.get("acodec"),
-                "filesize": f.get("filesize"),
-            })
-
-        # 높이 중복 제거
-        unique_heights = {}
-
-        for item in formats:
-            h = item["height"]
-
-            if h not in unique_heights:
-                unique_heights[h] = item
-
-        clean_formats = sorted(
-            unique_heights.values(),
-            key=lambda x: x["height"],
-            reverse=True,
-        )
-
-        return {
-            "title": data.get("title"),
-            "duration": data.get("duration"),
-            "uploader": data.get("uploader"),
-            "thumbnail": data.get("thumbnail"),
-            "formats": clean_formats,
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            400,
-            f"영상 정보를 가져올 수 없습니다: {str(e)[-3000:]}",
-        )
-
-
-# =========================================================
-# 다운로드
-# =========================================================
-
-@app.get("/api/download")
-def download(
-    url: str = Query(..., min_length=10),
-    format: str = Query(
-        "mp3",
-        pattern="^(mp3|m4a|mp4)$",
-    ),
-    quality: str = Query("192"),
-):
-    validate_youtube_url(url)
-
-    tmp_dir = tempfile.mkdtemp(
-        prefix="ytdl_"
-    )
-
-    try:
-        options = base_options(
-            tmp_dir
-        )
-
-        # -------------------------------------------------
-        # MP3
-        # -------------------------------------------------
-
-        if format == "mp3":
-
-            q = re.sub(
-                r"\D",
-                "",
-                quality,
-            )
-
-            if q not in {
-                "320",
-                "256",
-                "192",
-                "128",
-                "96",
-            }:
-                q = "192"
-
-            options.update({
-                "format": (
-                    "bestaudio/best"
-                ),
-
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": q,
-                }],
-            })
-
-            media_type = "audio/mpeg"
-            extensions = {".mp3"}
-
-        # -------------------------------------------------
-        # M4A
-        # -------------------------------------------------
-
-        elif format == "m4a":
-
-            options.update({
-                "format": (
-                    "bestaudio[ext=m4a]/"
-                    "bestaudio"
-                ),
-            })
-
-            media_type = "audio/mp4"
-            extensions = {".m4a"}
-
-        # -------------------------------------------------
-        # MP4
-        # -------------------------------------------------
-
-        else:
-
-            if quality == "best":
-
-                fmt = (
-                    "bestvideo[ext=mp4]+"
-                    "bestaudio[ext=m4a]/"
-                    "best[ext=mp4]/"
-                    "best"
-                )
-
-            else:
-
-                height = re.sub(
-                    r"\D",
-                    "",
-                    quality,
-                ) or "1080"
-
-                fmt = (
-                    f"bestvideo[height<={height}]"
-                    f"[ext=mp4]+"
-                    f"bestaudio[ext=m4a]/"
-                    f"best[height<={height}]"
-                    f"[ext=mp4]/"
-                    f"best[height<={height}]/"
-                    f"best"
-                )
-
-            options.update({
-                "format": fmt,
-                "merge_output_format": "mp4",
-            })
-
-            media_type = "video/mp4"
-            extensions = {".mp4"}
-
-        # -------------------------------------------------
-        # 실행
-        # -------------------------------------------------
 
         with yt_dlp.YoutubeDL(
             options
         ) as ydl:
 
-            ydl.download([url])
+            data = ydl.extract_info(
+                url,
+                download=False
+            )
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "영상 정보를 가져올 수 없습니다: "
+                f"{e}"
+            )
+        )
+
+    formats = []
+
+    for f in data.get("formats") or []:
+
+        formats.append({
+            "format_id": f.get("format_id"),
+            "ext": f.get("ext"),
+            "height": f.get("height"),
+            "width": f.get("width"),
+            "fps": f.get("fps"),
+            "vcodec": f.get("vcodec"),
+            "acodec": f.get("acodec"),
+            "video_ext": f.get("video_ext"),
+            "audio_ext": f.get("audio_ext"),
+            "filesize": f.get("filesize"),
+        })
+
+    return {
+        "title": data.get("title"),
+        "duration": data.get("duration"),
+        "uploader": data.get("uploader"),
+        "thumbnail": data.get("thumbnail"),
+        "id": data.get("id"),
+        "formats": formats,
+    }
+
+
+# ============================================================
+# 실제 다운로드
+# ============================================================
+
+@app.get("/api/download")
+def download(
+    url: str = Query(
+        ...,
+        min_length=10
+    ),
+
+    format: str = Query(
+        "mp3",
+        pattern="^(mp3|m4a|mp4)$"
+    ),
+
+    quality: str = Query(
+        "192 kbps"
+    ),
+):
+
+    validate_url(url)
+
+    tmpdir = tempfile.mkdtemp(
+        prefix="ytdl_"
+    )
+
+    try:
+
+        outtmpl = os.path.join(
+            tmpdir,
+            "%(title).150B [%(id)s].%(ext)s"
+        )
+
+        base = get_base_options()
+
+        base.update({
+            "outtmpl": outtmpl,
+        })
+
+
+        # ====================================================
+        # MP3
+        # ====================================================
+
+        if format == "mp3":
+
+            bitrate_match = re.search(
+                r"(\d+)",
+                quality
+            )
+
+            bitrate = (
+                bitrate_match.group(1)
+                if bitrate_match
+                else "192"
+            )
+
+            ydl_opts = {
+                **base,
+
+                "format":
+                    "bestaudio/best",
+
+                "postprocessors": [
+                    {
+                        "key":
+                            "FFmpegExtractAudio",
+
+                        "preferredcodec":
+                            "mp3",
+
+                        "preferredquality":
+                            bitrate,
+                    }
+                ],
+            }
+
+            media_type = "audio/mpeg"
+
+
+        # ====================================================
+        # M4A
+        # ====================================================
+
+        elif format == "m4a":
+
+            ydl_opts = {
+                **base,
+
+                "format":
+                    "bestaudio[ext=m4a]/"
+                    "bestaudio/best",
+            }
+
+            media_type = "audio/mp4"
+
+
+        # ====================================================
+        # MP4
+        # ====================================================
+
+        else:
+
+            height_match = re.search(
+                r"(\d+)",
+                quality
+            )
+
+            if height_match:
+
+                height = (
+                    height_match.group(1)
+                )
+
+                format_spec = (
+                    f"bestvideo"
+                    f"[height<={height}]"
+                    f"[vcodec^=avc1]+"
+                    f"bestaudio[ext=m4a]/"
+
+                    f"best[height<={height}]"
+                    f"[vcodec^=avc1]/"
+
+                    f"bestvideo"
+                    f"[height<={height}]"
+                    f"[ext=mp4]+"
+                    f"bestaudio[ext=m4a]/"
+
+                    f"best[height<={height}]"
+                )
+
+            else:
+
+                format_spec = (
+                    "bestvideo[vcodec^=avc1]+"
+                    "bestaudio[ext=m4a]/"
+
+                    "best[vcodec^=avc1]/"
+
+                    "bestvideo[ext=mp4]+"
+                    "bestaudio[ext=m4a]/"
+
+                    "best"
+                )
+
+            ydl_opts = {
+                **base,
+
+                "format":
+                    format_spec,
+
+                "merge_output_format":
+                    "mp4",
+            }
+
+            media_type = "video/mp4"
+
+
+        # ====================================================
+        # yt-dlp 실행
+        # ====================================================
+
+        with yt_dlp.YoutubeDL(
+            ydl_opts
+        ) as ydl:
+
+            ydl.extract_info(
+                url,
+                download=True
+            )
+
+
+        # ====================================================
+        # 결과 파일
+        # ====================================================
 
         files = [
-            p
-            for p in Path(tmp_dir).iterdir()
-            if (
-                p.is_file()
-                and p.stat().st_size > 0
-                and p.suffix.lower()
-                in extensions
-            )
+            f
+            for f in Path(
+                tmpdir
+            ).iterdir()
+            if f.is_file()
         ]
 
         if not files:
+
             raise HTTPException(
-                500,
-                "다운로드된 파일을 찾지 못했습니다.",
+                status_code=500,
+                detail=(
+                    "다운로드된 파일이 없습니다."
+                )
             )
 
-        output_file = max(
+
+        # 가장 큰 파일 선택
+        filepath = max(
             files,
-            key=lambda p: p.stat().st_size,
+            key=lambda f:
+                f.stat().st_size
         )
 
         filename = safe_filename(
-            output_file.name
+            filepath.name
         )
+
 
         return FileResponse(
-            output_file,
+            path=str(filepath),
+
             media_type=media_type,
+
             filename=filename,
+
             background=BackgroundTask(
                 shutil.rmtree,
-                tmp_dir,
-                ignore_errors=True,
-            ),
+                tmpdir,
+                ignore_errors=True
+            )
         )
 
+
     except HTTPException:
+
         shutil.rmtree(
-            tmp_dir,
-            ignore_errors=True,
+            tmpdir,
+            ignore_errors=True
         )
+
         raise
+
 
     except Exception as e:
 
         shutil.rmtree(
-            tmp_dir,
-            ignore_errors=True,
+            tmpdir,
+            ignore_errors=True
         )
-
-        message = str(e)
 
         raise HTTPException(
-            500,
-            f"다운로드 실패: {message[-4000:]}",
+            status_code=500,
+            detail=(
+                f"다운로드 실패: {e}"
+            )
         )
+
+
+# ============================================================
+# Player Client 개별 테스트
+# ============================================================
+
+def test_player_client(
+    url: str,
+    client: str
+):
+
+    result = {
+        "client": client,
+        "success": False,
+        "title": None,
+        "video_id": None,
+        "format_count": 0,
+        "error": None,
+    }
+
+    try:
+
+        options = get_base_options()
+
+        options.update({
+
+            "quiet": True,
+
+            "no_warnings": True,
+
+            "skip_download": True,
+
+            "socket_timeout": 30,
+
+            "extractor_args": {
+
+                "youtube": {
+                    "player_client": [
+                        client
+                    ]
+                },
+
+                "youtubepot-bgutilhttp": {
+                    "base_url":
+                        (
+                            f"http://127.0.0.1:"
+                            f"{BGUTIL_PORT}"
+                        )
+                },
+            },
+        })
+
+        with yt_dlp.YoutubeDL(
+            options
+        ) as ydl:
+
+            data = ydl.extract_info(
+                url,
+                download=False
+            )
+
+        result["success"] = True
+
+        result["title"] = (
+            data.get("title")
+        )
+
+        result["video_id"] = (
+            data.get("id")
+        )
+
+        result["format_count"] = len(
+            data.get("formats") or []
+        )
+
+    except Exception as e:
+
+        result["error"] = str(e)[:2000]
+
+    return result
+
+
+# ============================================================
+# 진단
+# ============================================================
+
+def run_diagnosis(url: str):
+
+    result = {}
+
+    # --------------------------------------------------------
+    # yt-dlp
+    # --------------------------------------------------------
+
+    try:
+
+        result["yt_dlp"] = {
+            "ok": True,
+            "version":
+                pkg_version("yt-dlp"),
+        }
+
+    except Exception as e:
+
+        result["yt_dlp"] = {
+            "ok": False,
+            "error": str(e),
+        }
+
+
+    # --------------------------------------------------------
+    # YouTube HTTP
+    # --------------------------------------------------------
+
+    youtube_http = (
+        check_youtube_http()
+    )
+
+    result["youtube_http"] = (
+        youtube_http
+    )
+
+
+    # --------------------------------------------------------
+    # BgUtils
+    # --------------------------------------------------------
+
+    bgutil = check_bgutil()
+
+    result["bgutil"] = bgutil
+
+
+    # --------------------------------------------------------
+    # FFmpeg
+    # --------------------------------------------------------
+
+    ffmpeg = check_ffmpeg()
+
+    result["ffmpeg"] = ffmpeg
+
+
+    # --------------------------------------------------------
+    # Cookies
+    # --------------------------------------------------------
+
+    result["cookies"] = {
+        "configured": bool(
+            os.environ.get(
+                "YOUTUBE_COOKIES",
+                ""
+            ).strip()
+        )
+    }
+
+
+    # --------------------------------------------------------
+    # Player Clients
+    # --------------------------------------------------------
+
+    clients = [
+        "mweb",
+        "web_safari",
+        "web_embedded",
+        "android_vr",
+        "tv",
+    ]
+
+    client_results = []
+
+    for client in clients:
+
+        client_results.append(
+            test_player_client(
+                url,
+                client
+            )
+        )
+
+    result["clients"] = (
+        client_results
+    )
+
+
+    # --------------------------------------------------------
+    # 최종 판단
+    # --------------------------------------------------------
+
+    client_ok = any(
+        x.get("success") is True
+        for x in client_results
+    )
+
+    if client_ok:
+
+        level = "ok"
+
+        title = (
+            "사용 가능한 YouTube Player Client가 확인되었습니다."
+        )
+
+    elif (
+        result["yt_dlp"].get("ok")
+        and bgutil.get("tcp")
+    ):
+
+        level = "warn"
+
+        title = (
+            "서버 구성은 동작하지만 "
+            "YouTube Player 응답 추출에 실패했습니다."
+        )
+
+    else:
+
+        level = "error"
+
+        title = (
+            "YouTube 연결 구성에 문제가 있습니다."
+        )
+
+
+    result["diagnosis"] = {
+        "level": level,
+        "title": title,
+    }
+
+    return result
+
+
+# ============================================================
+# /api/diagnose
+# ============================================================
+
+@app.get("/api/diagnose")
+def diagnose(
+    url: str = Query(
+        ...,
+        min_length=10
+    )
+):
+
+    validate_url(url)
+
+    try:
+
+        result = run_diagnosis(
+            url
+        )
+
+        return result
+
+    except Exception as e:
+
+        return {
+            "diagnosis": {
+                "level": "error",
+                "title": "진단 실행 중 오류가 발생했습니다.",
+            },
+
+            "error": str(e),
+
+            "clients": [],
+        }
+
+
+# ============================================================
+# 기존 /api/diag도 유지
+# ============================================================
+
+@app.get("/api/diag")
+def diag(
+    url: str = Query(
+        "https://youtu.be/DerxkQjViXg",
+        min_length=10
+    )
+):
+
+    validate_url(url)
+
+    return run_diagnosis(
+        url
+    )
+
+
+# ============================================================
+# 기존 Player Client 테스트 API
+# ============================================================
+
+@app.get("/api/test-clients")
+def test_clients(
+    url: str = Query(
+        ...,
+        min_length=10
+    )
+):
+
+    validate_url(url)
+
+    clients = [
+        "mweb",
+        "web_safari",
+        "web_embedded",
+        "android_vr",
+        "tv",
+    ]
+
+    results = []
+
+    for client in clients:
+
+        results.append(
+            test_player_client(
+                url,
+                client
+            )
+        )
+
+    return {
+        "ok": True,
+
+        "url": url,
+
+        "cookies": bool(
+            os.environ.get(
+                "YOUTUBE_COOKIES",
+                ""
+            ).strip()
+        ),
+
+        "results": results,
+    }
