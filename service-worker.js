@@ -1,4 +1,5 @@
-const CACHE = "downloader-v3";
+const CACHE =
+  "downloader-v6";
 
 const ASSETS = [
   "./",
@@ -39,9 +40,7 @@ self.addEventListener(
         .keys()
         .then(
           (keys) =>
-
             Promise.all(
-
               keys
                 .filter(
                   (key) =>
@@ -66,7 +65,7 @@ self.addEventListener(
   "fetch",
   (event) => {
 
-    // API는 캐시하지 않음
+    // Render API는 캐시하지 않는다.
     if (
       event.request.url.includes(
         "/api/"
@@ -74,7 +73,6 @@ self.addEventListener(
     ) {
       return;
     }
-
 
     event.respondWith(
 
