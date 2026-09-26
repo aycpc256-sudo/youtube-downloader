@@ -42,6 +42,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ★ yt-dlp master 강제 재설치 (pip 캐시 무시)
+RUN pip install --no-cache-dir --force-reinstall --no-deps \
+    "yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/refs/heads/master.zip"
+
 COPY server.py .
 
 # ============================================================
