@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <title>Render / YouTube 서버 진단</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .diag-nav { display:flex; gap:8px; margin-bottom:14px; }
+    .diag-nav a {
+      display:inline-block; padding:9px 13px; border-radius:10px;
+      background:#222; color:#fff; text-decoration:none; font-size:14px;
+    }
+    .diag-nav a.active { background:#444; }
+    .diag-actions { display:flex; gap:8px; margin-top:12px; }
+    .diag-actions button { flex:1; }
+    .diag-summary {
+      display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px; margin-top:14px;
+    }
+    .diag-item {
+      background:#181818; border:1px solid #2d2d2d; border-radius:10px;
+      padding:10px;
+    }
+    .diag-item .k { color:#999; font-size:12px; }
+    .diag-item .v { margin-top:4px; font-weight:600; word-break:break-word; }
+    .ok { color:#4caf50; }
+    .bad { color:#e53935; }
+    .warn { color:#ff9800; }
+    .muted { color:#999; }
+    .client {
+      margin-top:10px; padding:12px; border:1px solid #2d2d2d;
+      border-radius:10px; background:#181818;
+    }
+    .client-head { display:flex; justify-content:space-between; gap:8px; }
+    pre.diag-json {
+      white-space:pre-wrap; word-break:break-word; overflow:auto;
+      max-height:520px; margin:14px 0 0; padding:12px;
+      background:#101010; border-radius:10px; font-size:12px;
+    }
+    .small-note { font-size:12px; color:#888; margin-top:10px; line-height:1.5; }
+  </style>
+</head>
+
+<body>
+<main class="app">
+
+  <div class="diag-nav">
+    <a href="index.html">Downloader</a>
+    <a class="active" href="diagnostic.html">서버 진단</a>
+  </div>
+
+  <header class="header">
+    <h1>Render / YouTube 진단</h1>
+    <p class="subtitle">현재 Render 서버에서 YouTube 접근 상태를 확인합니다.</p>
+  </header>
+
+  <section class="card">
+    <label for="diag-url" class="label">YouTube URL</label>
+    <input
+      id="diag-url"
+      type="url"
+      inputmode="url"
+      autocomplete="off"
+      placeholder="https://www.youtube.com/watch?v=..."
+    />
+
+    <div class="diag-actions">
+      <button id="health-btn" class="secondary" type="button">서버 상태</button>
+      <button id="diagnose-btn" class="primary" type="button">진단 시작</button>
+    </div>
+
+    <p id="diag-status" class="status">대기 중</p>
+  </section>
+
+  <section id="summary-card" class="card hidden">
+    <div class="label">진단 요약</div>
+    <div id="summary" class="diag-summary"></div>
+  </section>
+
+  <section id="clients-card" class="card hidden">
+    <div class="label">YouTube Client별 결과</div>
+    <div id="clients"></div>
+  </section>
+
+  <section id="raw-card" class="card hidden">
+    <div class="row between">
+      <div>
+        <div class="label">상세 JSON</div>
+        <div class="hint">Render 로그와 함께 확인할 때 사용합니다.</div>
+      </div>
+      <button id="copy-btn" class="ghost" type="button">복사</button>
+    </div>
+    <pre id="raw-json" class="diag-json"></pre>
+  </section>
+
+  <p class="small-note">
+    진단은 서버 상태와 YouTube 접근 문제를 확인하기 위한 용도입니다.
+    다운로드 권한이 있는 콘텐츠만 사용하세요.
+  </p>
+
+</main>
+
+<script src="diagnostic.js"></script>
+</body>
+</html>
