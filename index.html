@@ -1,248 +1,89 @@
 <!DOCTYPE html>
 <html lang="ko">
-
 <head>
-
-  <meta charset="UTF-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-  >
-
-  <meta
-    name="theme-color"
-    content="#111111"
-  >
-
-  <meta
-    name="apple-mobile-web-app-capable"
-    content="yes"
-  >
-
-  <meta
-    name="apple-mobile-web-app-title"
-    content="Downloader"
-  >
-
-  <link
-    rel="manifest"
-    href="manifest.json"
-  >
-
-  <link
-    rel="stylesheet"
-    href="styles.css"
-  >
-
-  <title>
-    개인용 Downloader
-  </title>
-
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <title>개인용 YouTube Downloader</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
-
 
 <body>
 
 <main class="app">
 
   <header class="header">
-
-    <h1>
-      개인용 Downloader
-    </h1>
-
-    <p
-      class="subtitle"
-      id="device-label"
-    >
-      기기 확인 중...
-    </p>
-
+    <h1>개인용 Downloader</h1>
+    <p id="device-label" class="subtitle">기기 확인 중...</p>
   </header>
 
-
   <!-- URL -->
-
   <section class="card">
-
-    <label
-      class="label"
-      for="url"
-    >
-      YouTube URL
-    </label>
-
+    <label for="url" class="label">YouTube URL</label>
     <input
       id="url"
       type="url"
       inputmode="url"
       autocomplete="off"
       placeholder="https://youtu.be/..."
-    >
-
+    />
   </section>
 
-
-  <!-- 형식 -->
-
+  <!-- Format -->
   <section class="card">
-
-    <div class="label">
-      다운로드 형식
-    </div>
+    <div class="label">다운로드 형식</div>
 
     <div class="row">
-
-      <button
-        class="chip active"
-        type="button"
-        data-format="mp3"
-      >
-        MP3
-      </button>
-
-      <button
-        class="chip"
-        type="button"
-        data-format="m4a"
-      >
-        M4A
-      </button>
-
-      <button
-        class="chip"
-        type="button"
-        data-format="mp4"
-      >
-        MP4
-      </button>
-
+      <button class="chip active" data-format="mp3" type="button">MP3</button>
+      <button class="chip" data-format="m4a" type="button">M4A</button>
+      <button class="chip" data-format="mp4" type="button">MP4</button>
     </div>
 
-
-    <div
-      class="label quality-label"
-    >
-
+    <div class="label" style="margin-top:14px;">
       품질
-
-      <span
-        id="quality-hint"
-        class="hint"
-      >
-        MP3 음질
-      </span>
-
+      <span id="quality-hint" class="hint">MP3 음질</span>
     </div>
 
-
-    <select
-      id="quality"
-    >
-    </select>
-
-
-    <div
-      id="video-info"
-      class="video-info"
-    >
-    </div>
-
+    <select id="quality"></select>
   </section>
 
-
-  <!-- 다운로드 -->
-
-  <section class="card">
-
-    <button
-      id="download-btn"
-      class="primary"
-      type="button"
-    >
-      다운로드
-    </button>
-
-
-    <button
-      id="cancel-btn"
-      class="secondary"
-      type="button"
-      disabled
-    >
-      취소
-    </button>
-
-
-    <div
-      class="progress-wrap"
-    >
-
-      <div
-        id="progress-bar"
-        class="progress-bar"
-      ></div>
-
-    </div>
-
-
-    <p
-      id="status"
-      class="status"
-    ></p>
-
+  <!-- Video information -->
+  <section id="video-info" class="card hidden">
+    <div id="video-title" class="video-title"></div>
+    <div id="video-meta" class="hint"></div>
   </section>
 
+  <!-- Buttons -->
+  <button id="download-btn" class="primary" type="button">다운로드</button>
+  <button id="cancel-btn" class="secondary" type="button" disabled>취소</button>
 
-  <!-- 진단 -->
+  <!-- Progress -->
+  <div class="progress-wrap">
+    <div id="progress-bar" class="progress-bar"></div>
+  </div>
 
-  <section class="card">
+  <p id="status" class="status">대기 중</p>
 
+  <!-- Diagnosis -->
+  <section class="card diagnose-card">
     <div class="row between">
-
       <div>
-
-        <div class="label">
-          서버 진단
-        </div>
-
-        <div class="hint">
-          YouTube client / Deno / FFmpeg / PO Token
-        </div>
-
+        <div class="label">서버 진단</div>
+        <div class="hint">YouTube client / Deno / BgUtils 확인</div>
       </div>
-
-      <button
-        id="diagnose-btn"
-        class="ghost"
-        type="button"
-      >
-        진단
-      </button>
-
+      <button id="diagnose-btn" class="ghost" type="button">진단</button>
     </div>
 
-
-    <pre
-      id="diagnose-result"
-      class="diagnose-result"
-    ></pre>
-
+    <pre id="diagnose-result" class="diagnose-result"></pre>
   </section>
-
 
   <footer class="footer">
-
-    개인용 웹 Downloader
-
+    개인용 · 본인이 소유하거나 다운로드 권한이 있는 콘텐츠에만 사용하세요.
   </footer>
 
 </main>
 
-
 <script src="app.js"></script>
 
 </body>
-
 </html>
