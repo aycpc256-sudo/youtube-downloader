@@ -287,26 +287,114 @@ def extract_info_with_client(url: str, client: str):
 # MP4 화질 추출
 # ============================================================
 
+# YouTube가 실제로 기본 제공하는 표준 화질 사다리.
+# 이 높이에 해당하는 것 중 비트레이트가 가장 높은 트랙을 "(기본)"으로 표시한다.
+STANDARD_MP4_HEIGHTS = {2160, 1440, 1080, 720, 480, 360, 240, 144}
+
+
 def extract_mp4_qualities(data):
-    heights = set()
+    by_height = {}
 
     for fmt in data.get("formats", []):
         try:
             ext = fmt.get("ext")
             height = fmt.get("height")
             vcodec = fmt.get("vcodec")
+            format_id = fmt.get("format_id")
 
-            if (
+            if not (
                 ext == "mp4"
                 and height
                 and vcodec
                 and vcodec != "none"
+                and format_id
             ):
-                heights.add(int(height))
+                continue
+
+            height = int(height)
+            fps = fmt.get("fps")
+            tbr = fmt.get("tbr") or fmt.get("vbr") or 0
+
+            by_height.setdefault(height, []).append({
+                "format_id": str(format_id),
+                "height": height,
+                "fps": int(fps) if fps else None,
+                "tbr": tbr,
+                "filesize": fmt.get("filesize") or fmt.get("filesize_approx"),
+            })
         except Exception:
             continue
 
-    return sorted(heights, reverse=True)
+    defaults = []
+    extras = []
+
+    # 높은 화질부터, 같은 높이에서는 비트레이트가 높은 트랙을 우선한다.
+    for height in sorted(by_height.keys(), reverse=True):
+        variants = sorted(
+            by_height[height],
+            key=lambda x: (x["tbr"] or 0),
+            reverse=True,
+        )
+        is_standard = height in STANDARD_MP4_HEIGHTS
+
+        for index, variant in enumerate(variants):
+            item = {
+                "format_id": variant["format_id"],
+                "height": height,
+                "fps": variant["fps"],
+                "filesize": variant["filesize"],
+                "default": is_standard and index == 0,
+            }
+            (defaults if item["default"] else extras).append(item)
+
+    # 기본(표준) 화질을 먼저, 나머지(같은 높이의 추가 트랙 / 비표준 높이)는 뒤로
+    return defaults + extras
+
+
+# ============================================================
+# M4A 화질 추출 (YouTube가 실제로 제공하는 audio-only m4a 트랙)
+# ============================================================
+
+def extract_m4a_qualities(data):
+    results = []
+    seen = set()
+
+    for fmt in data.get("formats", []):
+        try:
+            ext = fmt.get("ext")
+            acodec = fmt.get("acodec")
+            vcodec = fmt.get("vcodec")
+            format_id = fmt.get("format_id")
+            abr = fmt.get("abr")
+
+            is_audio_only = (not vcodec) or vcodec == "none"
+
+            if not (
+                ext == "m4a"
+                and acodec
+                and acodec != "none"
+                and is_audio_only
+                and format_id
+            ):
+                continue
+
+            abr_display = int(round(abr)) if abr else None
+            key = abr_display if abr_display is not None else format_id
+
+            if key in seen:
+                continue
+            seen.add(key)
+
+            results.append({
+                "format_id": str(format_id),
+                "abr": abr_display,
+                "filesize": fmt.get("filesize") or fmt.get("filesize_approx"),
+            })
+        except Exception:
+            continue
+
+    results.sort(key=lambda x: (x["abr"] or 0), reverse=True)
+    return results
 
 
 # ============================================================
@@ -460,6 +548,7 @@ def info(url: str = Query(..., min_length=10)):
     data = result["data"]
     client = result["client"]
     mp4_qualities = extract_mp4_qualities(data)
+    m4a_qualities = extract_m4a_qualities(data)
 
     return {
         "ok": True,
@@ -470,6 +559,7 @@ def info(url: str = Query(..., min_length=10)):
         "thumbnail": data.get("thumbnail"),
         "client": client,
         "mp4_qualities": mp4_qualities,
+        "m4a_qualities": m4a_qualities,
         "format_count": len(data.get("formats", [])),
         "fallback_errors": result["errors"],
     }
@@ -512,23 +602,26 @@ def build_download_options(
         return base, "audio/mpeg"
 
     if format_name == "m4a":
-        base.update({
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
-        })
+        # quality는 프론트에서 넘겨준 YouTube format_id (예: "140", "251-drc")
+        format_id = re.sub(r"[^A-Za-z0-9_\-\.]", "", quality or "")
+
+        if format_id:
+            fmt_spec = f"{format_id}/bestaudio[ext=m4a]/bestaudio/best"
+        else:
+            fmt_spec = "bestaudio[ext=m4a]/bestaudio/best"
+
+        base.update({"format": fmt_spec})
         return base, "audio/mp4"
 
-    # MP4
-    m = re.search(r"(\d+)", quality)
+    # MP4 — quality는 프론트에서 넘겨준 YouTube 비디오 format_id (예: "137")
+    format_id = re.sub(r"[^A-Za-z0-9_\-\.]", "", quality or "")
 
-    if m:
-        height = m.group(1)
+    if format_id:
         fmt_spec = (
-            f"bestvideo[height<={height}][ext=mp4]+"
-            f"bestaudio[ext=m4a]/"
-            f"bestvideo[height<={height}]+"
-            f"bestaudio/"
-            f"best[height<={height}][ext=mp4]/"
-            f"best[height<={height}]/"
+            f"{format_id}+bestaudio[ext=m4a]/"
+            f"{format_id}+bestaudio/"
+            f"{format_id}/"
+            f"best[ext=mp4]/"
             f"best"
         )
     else:
